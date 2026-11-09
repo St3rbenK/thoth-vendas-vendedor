@@ -27,10 +27,13 @@ interface MaisViewProps {
   onUpdateUser: (u: UsuarioVendedor) => void
   clientes: Cliente[]
   onClienteCreated: (c: Cliente) => void
+  onSelectClienteForOrder?: (c: Cliente) => void
   empresaAtiva: EmpresaVinculo | null
   empresasCount: number
   onSwitchEmpresa: () => void
   onLogout: () => void
+  autoOpenNewClient?: boolean
+  onClearAutoOpenNewClient?: () => void
 }
 
 export function MaisView({
@@ -38,13 +41,23 @@ export function MaisView({
   onUpdateUser,
   clientes,
   onClienteCreated,
+  onSelectClienteForOrder,
   empresaAtiva,
   empresasCount,
   onSwitchEmpresa,
   onLogout,
+  autoOpenNewClient = false,
+  onClearAutoOpenNewClient,
 }: MaisViewProps) {
   // Modal Novo Cliente
-  const [novoClienteModalOpen, setNovoClienteModalOpen] = useState(false)
+  const [novoClienteModalOpen, setNovoClienteModalOpen] = useState(autoOpenNewClient)
+
+  React.useEffect(() => {
+    if (autoOpenNewClient) {
+      setNovoClienteModalOpen(true)
+      if (onClearAutoOpenNewClient) onClearAutoOpenNewClient()
+    }
+  }, [autoOpenNewClient, onClearAutoOpenNewClient])
   const [clienteSearch, setClienteSearch] = useState('')
   const [salvandoCliente, setSalvandoCliente] = useState(false)
   const [buscandoCep, setBuscandoCep] = useState(false)
@@ -332,8 +345,17 @@ export function MaisView({
                     {c.telefone && <span>• {c.telefone}</span>}
                   </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <span className="text-[10px] font-mono text-teal-600 bg-teal-50 px-2 py-0.5 rounded-full">
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {onSelectClienteForOrder && !c.bloqueado && (
+                    <button
+                      type="button"
+                      onClick={() => onSelectClienteForOrder(c)}
+                      className="text-[11px] font-bold text-white bg-teal-600 hover:bg-teal-700 px-2.5 py-1 rounded-lg shadow-2xs transition-colors"
+                    >
+                      Vender
+                    </button>
+                  )}
+                  <span className="hidden sm:inline-block text-[10px] font-mono text-teal-600 bg-teal-50 px-2 py-0.5 rounded-full">
                     Ativo
                   </span>
                 </div>
@@ -356,8 +378,8 @@ export function MaisView({
 
       {/* Modal: Cadastro de Novo Cliente */}
       {novoClienteModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4">
-          <div className="w-full max-w-lg max-h-[92vh] flex flex-col rounded-3xl bg-white shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs sm:p-4">
+          <div className="w-full max-w-lg max-h-[90dvh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-teal-600" />
@@ -450,30 +472,31 @@ export function MaisView({
                   )}
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
                     <label className="block text-[11px] text-slate-500 mb-1">CEP</label>
                     <input
                       type="text"
+                      inputMode="numeric"
                       value={clienteForm.cep || ''}
                       onChange={(e) => handleCepChange(e.target.value)}
                       placeholder="00000-000"
-                      className="w-full p-2 rounded-xl border border-slate-200 font-mono focus:outline-teal-500"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 font-mono focus:outline-teal-500"
                     />
                   </div>
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <label className="block text-[11px] text-slate-500 mb-1">Logradouro / Rua</label>
                     <input
                       type="text"
                       value={clienteForm.logradouro || ''}
                       onChange={(e) => setClienteForm({ ...clienteForm, logradouro: e.target.value })}
                       placeholder="Rua, Av..."
-                      className="w-full p-2 rounded-xl border border-slate-200 focus:outline-teal-500"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-teal-500"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 mt-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
                   <div>
                     <label className="block text-[11px] text-slate-500 mb-1">Número</label>
                     <input
@@ -481,7 +504,7 @@ export function MaisView({
                       value={clienteForm.numero || ''}
                       onChange={(e) => setClienteForm({ ...clienteForm, numero: e.target.value })}
                       placeholder="Nº"
-                      className="w-full p-2 rounded-xl border border-slate-200 focus:outline-teal-500"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-teal-500"
                     />
                   </div>
                   <div>
@@ -491,17 +514,17 @@ export function MaisView({
                       value={clienteForm.bairro || ''}
                       onChange={(e) => setClienteForm({ ...clienteForm, bairro: e.target.value })}
                       placeholder="Bairro"
-                      className="w-full p-2 rounded-xl border border-slate-200 focus:outline-teal-500"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-teal-500"
                     />
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <label className="block text-[11px] text-slate-500 mb-1">Cidade / UF</label>
                     <input
                       type="text"
                       value={clienteForm.cidade ? `${clienteForm.cidade}/${clienteForm.estado || ''}` : ''}
                       onChange={(e) => setClienteForm({ ...clienteForm, cidade: e.target.value })}
                       placeholder="Cidade/UF"
-                      className="w-full p-2 rounded-xl border border-slate-200 focus:outline-teal-500"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-teal-500"
                     />
                   </div>
                 </div>

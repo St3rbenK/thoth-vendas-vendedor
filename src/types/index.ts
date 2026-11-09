@@ -12,6 +12,8 @@ export interface Produto {
   estoque_atual: number
   estoque_reservado?: number
   estoque_minimo?: number
+  ncm?: string
+  codigo_barras?: string
   imagem_url?: string
   ativo: boolean
 }
@@ -44,10 +46,14 @@ export interface Cliente {
   cidade?: string
   estado?: string
   tabela_preco_id?: string
+  vendedor_id?: string
   limite_credito: number
   saldo_devedor: number
   bloqueado: boolean
   motivo_bloqueio?: string
+  ultimo_pedido_em?: string
+  ultimo_pedido_valor?: number
+  total_pedidos?: number
 }
 
 export interface ItemCarrinho {
@@ -60,8 +66,25 @@ export interface ItemCarrinho {
   precoUnitarioCobrado: number
   tabelaPrecoId?: string
   descontoPct: number
+  descontoValor?: number
   subtotal: number
   imagemUrl?: string
+}
+
+export interface OrcamentoSalvo {
+  id: string
+  numero: string
+  pedidoId?: string
+  cliente: Cliente | null
+  tabelaPrecoId?: string
+  condicaoPagamento: string
+  observacoes: string
+  itens: ItemCarrinho[]
+  subtotal: number
+  descontoTotal: number
+  valorTotal: number
+  createdAt: string
+  updatedAt: string
 }
 
 export interface CondicaoPagamentoOption {
@@ -117,7 +140,7 @@ export interface Pedido {
   tabela_preco_id?: string
   forma_pagamento_id?: string
   prazo_pagamento_id?: string
-  status: 'pendente' | 'aprovado' | 'faturado' | 'cancelado' | string
+  status: 'orcamento' | 'pendente' | 'enviado' | 'aprovado' | 'faturado' | 'cancelado' | string
   condicao_pagamento?: string
   forma_pagamento?: string
   subtotal: number
