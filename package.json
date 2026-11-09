@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy"
+    "preview": "vite preview",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name thoth-vendas-vendedor"
   },
   "dependencies": {
     "clsx": "^2.1.1",
