@@ -3,7 +3,7 @@ import {
   Package,
   ClipboardList,
   Target,
-  MoreHorizontal,
+  Settings,
   Building2,
   LogOut,
   ChevronRight,
@@ -53,7 +53,7 @@ export function DesktopSidebar({
       badgeAmber: true,
     },
     { id: 'meta' as TabType, label: 'Minha Meta', icon: Target },
-    { id: 'mais' as TabType, label: 'Clientes & Conta', icon: MoreHorizontal },
+    { id: 'mais' as TabType, label: 'Configurações', icon: Settings },
   ]
 
   const cartTotalFmt = cartTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -202,7 +202,7 @@ export function MobileBottomNav({
       badgeAmber: true,
     },
     { id: 'meta' as TabType, label: 'Meta', icon: Target },
-    { id: 'mais' as TabType, label: 'Clientes/Mais', icon: MoreHorizontal },
+    { id: 'mais' as TabType, label: 'Configurações', icon: Settings },
   ]
 
   return (

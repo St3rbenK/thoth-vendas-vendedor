@@ -655,6 +655,7 @@ export function App() {
             empresasCount={empresasDisponiveis.length}
             onSwitchEmpresa={() => setSwitchModalOpen(true)}
             onLogout={handleLogout}
+            onReloadData={carregarDados}
             autoOpenNewClient={autoOpenNewClient}
             onClearAutoOpenNewClient={() => setAutoOpenNewClient(false)}
           />
