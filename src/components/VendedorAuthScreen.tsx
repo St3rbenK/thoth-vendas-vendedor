@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
-import { Store, ShieldCheck, KeyRound, Building2, ChevronRight, Loader2, AlertCircle, Eye, EyeOff, ArrowLeft } from 'lucide-react'
+import { ShieldCheck, Building2, ChevronRight, Loader2, AlertCircle, Eye, EyeOff, ArrowLeft } from 'lucide-react'
 import { loginVendedor, selecionarEmpresa } from '../services/api'
+import { AppLogo } from './AppLogo'
 import type { EmpresaVinculo, UsuarioVendedor } from '../types'
 
 interface VendedorAuthScreenProps {
@@ -29,7 +30,12 @@ export const VendedorAuthScreen: React.FC<VendedorAuthScreenProps> = ({ onSucces
   }
 
   function handleCpfChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setCpf(formatCPF(e.target.value))
+    const val = e.target.value
+    if (val.includes('@') || /[a-zA-Z]/.test(val)) {
+      setCpf(val)
+    } else {
+      setCpf(formatCPF(val))
+    }
     if (erro) setErro('')
   }
 
@@ -92,28 +98,31 @@ export const VendedorAuthScreen: React.FC<VendedorAuthScreenProps> = ({ onSucces
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#0F3C46] via-[#0d343d] to-slate-900 flex flex-col justify-center px-4 py-8 sm:px-6 lg:px-8">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        {/* Cabeçalho / Logo */}
-        <div className="text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-teal-500 text-white shadow-xl shadow-teal-500/20 ring-4 ring-white/10">
-            <Store className="h-8 w-8" />
-          </div>
-          <h2 className="mt-4 text-2xl font-black tracking-tight text-white sm:text-3xl">
-            Thoth Vendas
-          </h2>
-          <p className="mt-1 text-xs font-semibold text-teal-300 uppercase tracking-widest">
-            Força de Vendas • Catálogo Mobile
-          </p>
-        </div>
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-center px-4 py-8 sm:px-6 lg:px-8 relative overflow-hidden">
+      {/* Glow decorativo superior sutil */}
+      <div className="pointer-events-none absolute -top-32 left-1/2 -translate-x-1/2 h-72 w-72 rounded-full bg-emerald-500/10 blur-3xl" />
 
-        {/* Card do Formulário */}
-        <div className="mt-6 rounded-3xl bg-white/95 backdrop-blur-md p-6 shadow-2xl ring-1 ring-black/5 sm:p-8">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10">
+        {/* Card Principal (Padrão Vue Dashboard) */}
+        <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-xl shadow-slate-200/60 sm:p-8">
+          {/* Logo Padrão Vue Dashboard */}
+          <div className="flex flex-col items-center text-center pb-5 border-b border-slate-100">
+            <AppLogo
+              product="vendas"
+              size="lg"
+              showText={true}
+              showSublabel={true}
+              sublabel="Força de Vendas • Catálogo B2B"
+            />
+          </div>
+
           {step === 'login' ? (
-            <form onSubmit={handleLoginSubmit} className="space-y-4">
-              <div className="border-b border-slate-100 pb-3">
+            <form onSubmit={handleLoginSubmit} className="space-y-4 pt-5">
+              <div>
                 <h3 className="text-sm font-bold text-slate-900">Acesso do Representante</h3>
-                <p className="text-xs text-slate-500">Digite seu CPF e seu PIN para ver o catálogo</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Digite seu CPF (ou e-mail) e seu PIN numérico para abrir o catálogo comercial
+                </p>
               </div>
 
               {erro && (
@@ -126,22 +135,20 @@ export const VendedorAuthScreen: React.FC<VendedorAuthScreenProps> = ({ onSucces
               {/* CPF */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  CPF do Vendedor
+                  CPF ou E-mail do Vendedor
                 </label>
                 <div className="relative">
                   <input
                     type="text"
-                    inputMode="numeric"
                     value={cpf}
                     onChange={handleCpfChange}
-                    placeholder="000.000.000-00"
-                    maxLength={14}
+                    placeholder="000.000.000-00 ou seu@email.com"
                     autoComplete="username"
                     required
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 py-3 font-mono text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-600 focus:bg-white focus:ring-4 focus:ring-teal-600/10"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 py-3 font-mono text-sm font-semibold text-slate-900 outline-none transition focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-600/10"
                   />
                 </div>
-                <p className="mt-1 text-[11px] text-slate-400">Pode digitar apenas números</p>
+                <p className="mt-1 text-[11px] text-slate-400">Digite os números do CPF ou seu e-mail cadastrado</p>
               </div>
 
               {/* PIN */}
@@ -150,7 +157,7 @@ export const VendedorAuthScreen: React.FC<VendedorAuthScreenProps> = ({ onSucces
                   <label className="block text-xs font-bold text-slate-700">
                     PIN Numérico
                   </label>
-                  <span className="text-[10px] font-semibold text-teal-700">Padrão inicial: 1234</span>
+                  <span className="text-[10px] font-semibold text-emerald-700">4 a 6 dígitos</span>
                 </div>
                 <div className="relative">
                   <input
@@ -162,7 +169,7 @@ export const VendedorAuthScreen: React.FC<VendedorAuthScreenProps> = ({ onSucces
                     maxLength={6}
                     autoComplete="current-password"
                     required
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 py-3 pr-10 font-mono text-sm font-semibold tracking-widest text-slate-900 outline-none transition focus:border-teal-600 focus:bg-white focus:ring-4 focus:ring-teal-600/10"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 py-3 pr-10 font-mono text-sm font-semibold tracking-widest text-slate-900 outline-none transition focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-600/10"
                   />
                   <button
                     type="button"
@@ -179,7 +186,7 @@ export const VendedorAuthScreen: React.FC<VendedorAuthScreenProps> = ({ onSucces
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full mt-2 flex items-center justify-center gap-2 rounded-xl bg-teal-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-teal-600/20 transition-all hover:bg-teal-500 active:scale-[0.98] disabled:opacity-50"
+                className="w-full mt-2 flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3.5 text-sm font-bold text-white shadow-md shadow-emerald-600/20 transition-all hover:bg-emerald-700 active:scale-[0.98] disabled:opacity-50"
               >
                 {loading ? (
                   <>
@@ -198,13 +205,13 @@ export const VendedorAuthScreen: React.FC<VendedorAuthScreenProps> = ({ onSucces
                 <p className="text-[11px] text-slate-400 leading-relaxed">
                   Não possui seu PIN ou CPF cadastrado?
                   <br />
-                  Peça ao gestor para cadastrá-lo no <strong>Painel de Vendas</strong>.
+                  Peça ao gestor para cadastrá-lo no <strong className="text-slate-600">thothvendas</strong>.
                 </p>
               </div>
             </form>
           ) : (
             /* Tela de Escolha de Empresa (quando o vendedor tem mais de uma) */
-            <div className="space-y-4">
+            <div className="space-y-4 pt-5">
               <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
                 <button
                   type="button"
@@ -236,14 +243,14 @@ export const VendedorAuthScreen: React.FC<VendedorAuthScreenProps> = ({ onSucces
                     type="button"
                     onClick={() => handleEscolherEmpresa(emp)}
                     disabled={loading}
-                    className="w-full flex items-center justify-between p-3.5 rounded-2xl border border-slate-200 bg-slate-50/70 hover:bg-teal-50 hover:border-teal-300 transition-all text-left group active:scale-[0.99]"
+                    className="w-full flex items-center justify-between p-3.5 rounded-2xl border border-slate-200 bg-slate-50/70 hover:bg-emerald-50 hover:border-emerald-300 transition-all text-left group active:scale-[0.99]"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="h-10 w-10 rounded-xl bg-teal-100 text-teal-800 flex items-center justify-center shrink-0 group-hover:bg-teal-500 group-hover:text-white transition-colors">
+                      <div className="h-10 w-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
                         <Building2 className="h-5 w-5" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="font-bold text-xs text-slate-900 truncate group-hover:text-teal-900">
+                        <div className="font-bold text-xs text-slate-900 truncate group-hover:text-emerald-900">
                           {emp.nome_fantasia || emp.razao_social}
                         </div>
                         {emp.cnpj && (
@@ -251,30 +258,33 @@ export const VendedorAuthScreen: React.FC<VendedorAuthScreenProps> = ({ onSucces
                             CNPJ: {emp.cnpj}
                           </div>
                         )}
-                        <span className="inline-block mt-0.5 text-[10px] font-bold uppercase tracking-wider text-teal-700">
+                        <span className="inline-block mt-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
                           {emp.role || 'Vendedor'}
                         </span>
                       </div>
                     </div>
-                    <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-teal-600 shrink-0 ml-2" />
+                    <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-emerald-600 shrink-0 ml-2" />
                   </button>
                 ))}
               </div>
 
               {loading && (
-                <div className="flex items-center justify-center gap-2 py-2 text-xs text-teal-700 font-semibold">
+                <div className="flex items-center justify-center gap-2 py-2 text-xs text-emerald-700 font-semibold">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span>Carregando dados da empresa…</span>
                 </div>
               )}
             </div>
           )}
-        </div>
 
-        {/* Rodapé institucional */}
-        <p className="mt-6 text-center text-xs text-teal-200/60">
-          Thoth Vendas • Tecnologia Thothfy Sistemas
-        </p>
+          {/* Rodapé institucional padrão Vue */}
+          <div className="mt-6 border-t border-slate-100 pt-4 text-center">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Ecossistema Thothfy · Alta Disponibilidade
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   )

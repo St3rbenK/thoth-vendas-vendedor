@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react'
 import { criarCliente, updateVendedorPerfil } from '../services/api'
+import { AppLogo } from './AppLogo'
 import type { Cliente, UsuarioVendedor, EmpresaVinculo, NovoClientePayload } from '../types'
 
 interface MaisViewProps {
@@ -366,7 +367,7 @@ export function MaisView({
       </div>
 
       {/* Botão de Logout */}
-      <div className="pt-2">
+      <div className="pt-2 space-y-5">
         <button
           onClick={onLogout}
           className="w-full flex items-center justify-center gap-2 p-3.5 rounded-2xl border border-rose-200 bg-rose-50/70 hover:bg-rose-100/80 text-rose-700 font-bold text-xs transition-colors shadow-xs"
@@ -374,6 +375,10 @@ export function MaisView({
           <LogOut className="h-4 w-4" />
           <span>Sair do Aplicativo de Vendas</span>
         </button>
+
+        <div className="flex flex-col items-center justify-center py-2 opacity-80">
+          <AppLogo product="vendas" size="sm" showText={true} showSublabel={true} sublabel="Ecossistema Thothfy • Força de Vendas" />
+        </div>
       </div>
 
       {/* Modal: Cadastro de Novo Cliente */}

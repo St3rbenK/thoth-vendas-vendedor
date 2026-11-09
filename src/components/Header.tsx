@@ -4,7 +4,6 @@ import {
   Search,
   X,
   WifiOff,
-  Store,
   Building2,
   User,
   ChevronLeft,
@@ -16,6 +15,7 @@ import {
   List,
   Layers,
 } from 'lucide-react'
+import { AppLogo } from './AppLogo'
 import type { Categoria, Cliente, TabelaPreco } from '../types'
 
 interface HeaderProps {
@@ -135,14 +135,20 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Linha Principal */}
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-2 px-3 py-2.5 sm:px-6 sm:py-3">
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
-          <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl bg-teal-500 text-white shadow-sm">
-            <Store className="h-5 w-5" />
-          </div>
+          <AppLogo product="vendas" size="sm" showText={false} variant="dark" />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <h1 className="truncate text-sm font-black leading-tight sm:text-base">
-                {storeName || 'Thoth Vendas'}
-              </h1>
+              <span className="font-extrabold tracking-tight text-sm sm:text-base text-white shrink-0">
+                thoth<span className="text-[#10B981]">vendas</span>
+              </span>
+              {storeName && (
+                <>
+                  <span className="text-white/30 text-xs">•</span>
+                  <h1 className="truncate text-xs sm:text-sm font-bold text-teal-100 leading-tight">
+                    {storeName}
+                  </h1>
+                </>
+              )}
               {empresasCount > 1 && onSwitchEmpresa && (
                 <button
                   type="button"

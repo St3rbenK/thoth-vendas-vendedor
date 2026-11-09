@@ -9,6 +9,7 @@ import {
   ChevronRight,
   ShoppingCart,
 } from 'lucide-react'
+import { AppLogo } from './AppLogo'
 import type { EmpresaVinculo, UsuarioVendedor } from '../types'
 
 export type TabType = 'produtos' | 'pedidos' | 'meta' | 'mais'
@@ -59,17 +60,16 @@ export function DesktopSidebar({
 
   return (
     <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 md:left-0 bg-slate-900 text-white z-30 shadow-xl border-r border-slate-800">
-      {/* Topo / Logo */}
+      {/* Topo / Logo Padrão Vue Dashboard */}
       <div className="p-5 border-b border-slate-800/80">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-emerald-600 font-black text-white shadow-lg shadow-teal-500/20 text-lg shrink-0">
-            T
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate font-black text-sm tracking-tight text-white">{storeName}</h1>
-            <p className="text-[10px] uppercase font-bold text-teal-400 tracking-wider">Força de Vendas</p>
-          </div>
-        </div>
+        <AppLogo
+          product="vendas"
+          size="md"
+          showText={true}
+          showSublabel={true}
+          sublabel={storeName || 'Força de Vendas'}
+          variant="dark"
+        />
 
         {/* Empresa Ativa / Seletor */}
         {empresasCount > 1 && (
