@@ -4,6 +4,10 @@ import { ProductCard } from './components/ProductCard'
 import { CartDrawer } from './components/CartDrawer'
 import { ClientSelectModal } from './components/ClientSelectModal'
 import { VendedorAuthScreen } from './components/VendedorAuthScreen'
+import { DesktopSidebar, MobileBottomNav, TabType } from './components/Navigation'
+import { PedidosView } from './components/PedidosView'
+import { MetaView } from './components/MetaView'
+import { MaisView } from './components/MaisView'
 import {
   getProdutos,
   getCategorias,
@@ -26,6 +30,9 @@ export function App() {
   const [empresasDisponiveis, setEmpresasDisponiveis] = useState<EmpresaVinculo[]>([])
   const [switchModalOpen, setSwitchModalOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
+
+  // Aba ativa: 'produtos' | 'pedidos' | 'meta' | 'mais'
+  const [activeTab, setActiveTab] = useState<TabType>('produtos')
 
   const [produtos, setProdutos] = useState<Produto[]>([])
   const [categorias, setCategorias] = useState<Categoria[]>([])
@@ -194,10 +201,12 @@ export function App() {
       if (idx >= 0) {
         const copy = [...prev]
         const newQty = copy[idx].quantidade + quantidade
+        const descPct = copy[idx].descontoPct || 0
+        const sub = newQty * precoCobrado
         copy[idx] = {
           ...copy[idx],
           quantidade: newQty,
-          subtotal: newQty * precoCobrado,
+          subtotal: sub * (1 - descPct / 100),
         }
         return copy
       }
@@ -225,10 +234,29 @@ export function App() {
     setItens((prev) =>
       prev.map((it) => {
         if (it.produtoId === produtoId) {
+          const sub = quantidade * it.precoUnitarioCobrado
+          const desc = sub * ((it.descontoPct || 0) / 100)
           return {
             ...it,
             quantidade,
-            subtotal: quantidade * it.precoUnitarioCobrado,
+            subtotal: sub - desc,
+          }
+        }
+        return it
+      })
+    )
+  }
+
+  const handleUpdateDesconto = (produtoId: string, descontoPct: number) => {
+    setItens((prev) =>
+      prev.map((it) => {
+        if (it.produtoId === produtoId) {
+          const sub = it.quantidade * it.precoUnitarioCobrado
+          const desc = sub * (descontoPct / 100)
+          return {
+            ...it,
+            descontoPct,
+            subtotal: sub - desc,
           }
         }
         return it
@@ -259,7 +287,7 @@ export function App() {
           produtoId: it.produtoId,
           quantidade: it.quantidade,
           precoUnitario: it.precoUnitarioCobrado,
-          descontoPct: it.descontoPct,
+          descontoPct: it.descontoPct || 0,
         })),
       }
       const res = await enviarPedido(payload)
@@ -270,6 +298,10 @@ export function App() {
       }
       setItens([])
       setCartOpen(false)
+      // Se estiver em pedidos, recarrega
+      if (activeTab === 'pedidos') {
+        window.location.reload()
+      }
     } catch (err: any) {
       alert(`Falha ao emitir pedido: ${err.message || err}`)
     } finally {
@@ -277,7 +309,7 @@ export function App() {
     }
   }
 
-  // Filtros
+  // Filtros de produtos
   const filteredProducts = useMemo(() => {
     return produtos.filter((p) => {
       if (selectedCategory && p.categoria_id !== selectedCategory) return false
@@ -301,82 +333,137 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-28 md:pb-10">
-      {/* Topo com branding, vendedor e empresa */}
-      <Header
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      {/* Barra Lateral no Desktop */}
+      <DesktopSidebar
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
         storeName={empresaNome}
-        vendedorNome={currentUser?.nome}
+        currentUser={currentUser}
+        empresaAtiva={empresaAtiva}
         empresasCount={empresasDisponiveis.length}
-        onSwitchEmpresa={() => setSwitchModalOpen(true)}
-        onLogout={handleLogout}
-        search={search}
-        setSearch={setSearch}
-        categories={categorias}
-        selectedCategory={selectedCategory}
-        setSelectedCategory={setSelectedCategory}
         cartCount={cartCount}
         cartTotal={cartTotal}
         onOpenCart={() => setCartOpen(true)}
-        isOffline={isOffline}
+        onSwitchEmpresa={() => setSwitchModalOpen(true)}
+        onLogout={handleLogout}
       />
 
-      {/* Conteúdo do Catálogo */}
-      <main className="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6">
-        <div className="mb-3 flex items-center justify-between text-xs text-slate-500 sm:text-sm px-1">
-          <span>
-            {filteredProducts.length} produto(s) disponível(is)
-            {fromCache ? ' • dados salvos offline' : ''}
-          </span>
-          {selectedCliente && (
-            <span className="font-bold text-teal-800 truncate max-w-[200px]">
-              👤 {selectedCliente.razao_social}
-            </span>
-          )}
-        </div>
+      {/* Área Central / Conteúdo Principal */}
+      <div className="flex-1 md:pl-64 min-w-0 pb-20 md:pb-8 flex flex-col min-h-screen">
+        {/* ABA: PRODUTOS */}
+        {activeTab === 'produtos' && (
+          <>
+            <Header
+              storeName={empresaNome}
+              vendedorNome={currentUser?.nome}
+              empresasCount={empresasDisponiveis.length}
+              onSwitchEmpresa={() => setSwitchModalOpen(true)}
+              onLogout={handleLogout}
+              search={search}
+              setSearch={setSearch}
+              categories={categorias}
+              selectedCategory={selectedCategory}
+              setSelectedCategory={setSelectedCategory}
+              cartCount={cartCount}
+              cartTotal={cartTotal}
+              onOpenCart={() => setCartOpen(true)}
+              isOffline={isOffline}
+            />
 
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-            <Loader2 className="h-8 w-8 animate-spin text-teal-600 mb-2" />
-            <p className="text-xs">Carregando catálogo de produtos…</p>
-          </div>
-        ) : filteredProducts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-white py-16 text-center">
-            <PackageSearch className="h-10 w-10 text-slate-300 mb-2" />
-            <p className="text-sm font-bold text-slate-700">Nenhum produto encontrado</p>
-            <p className="text-xs text-slate-400 mt-1">Tente ajustar a busca ou escolher outra categoria</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4">
-            {filteredProducts.map((p) => (
-              <ProductCard
-                key={p.id}
-                produto={p}
-                tabelas={tabelas}
-                onAddToCart={handleAddToCart}
-              />
-            ))}
-          </div>
+            <main className="mx-auto max-w-6xl w-full px-3 py-4 sm:px-6 sm:py-6 flex-1">
+              <div className="mb-3 flex items-center justify-between text-xs text-slate-500 sm:text-sm px-1">
+                <span>
+                  {filteredProducts.length} produto(s) disponível(is)
+                  {fromCache ? ' • dados salvos offline' : ''}
+                </span>
+                {selectedCliente && (
+                  <span className="font-bold text-teal-800 truncate max-w-[200px]">
+                    👤 {selectedCliente.razao_social}
+                  </span>
+                )}
+              </div>
+
+              {loading ? (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                  <Loader2 className="h-8 w-8 animate-spin text-teal-600 mb-2" />
+                  <p className="text-xs">Carregando catálogo de produtos…</p>
+                </div>
+              ) : filteredProducts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-white py-16 text-center">
+                  <PackageSearch className="h-10 w-10 text-slate-300 mb-2" />
+                  <p className="text-sm font-bold text-slate-700">Nenhum produto encontrado</p>
+                  <p className="text-xs text-slate-400 mt-1">Tente ajustar a busca ou escolher outra categoria</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4">
+                  {filteredProducts.map((p) => (
+                    <ProductCard
+                      key={p.id}
+                      produto={p}
+                      tabelas={tabelas}
+                      onAddToCart={handleAddToCart}
+                    />
+                  ))}
+                </div>
+              )}
+            </main>
+
+            {/* Barra Flutuante de Resumo do Pedido no Mobile */}
+            {cartCount > 0 && (
+              <div className="fixed bottom-14 left-0 right-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur px-4 py-3 shadow-xl md:hidden">
+                <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-semibold text-slate-400">Total do Pedido ({cartCount} itens)</div>
+                    <div className="text-lg font-black text-slate-900">{cartTotalFmt}</div>
+                  </div>
+                  <button
+                    onClick={() => setCartOpen(true)}
+                    className="flex items-center gap-1.5 rounded-xl bg-teal-600 px-5 py-3 text-sm font-bold text-white shadow-md shadow-teal-600/30 active:scale-95"
+                  >
+                    <span>Ver Pedido</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
-      </main>
 
-      {/* Barra Flutuante de Resumo do Pedido no Mobile */}
-      {cartCount > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur px-4 py-3 shadow-xl md:hidden">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] font-semibold text-slate-400">Total do Pedido ({cartCount} itens)</div>
-              <div className="text-lg font-black text-slate-900">{cartTotalFmt}</div>
-            </div>
-            <button
-              onClick={() => setCartOpen(true)}
-              className="flex items-center gap-1.5 rounded-xl bg-teal-600 px-5 py-3 text-sm font-bold text-white shadow-md shadow-teal-600/30 active:scale-95"
-            >
-              <span>Ver Pedido</span>
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
+        {/* ABA: PEDIDOS */}
+        {activeTab === 'pedidos' && (
+          <PedidosView empresaNome={empresaNome} />
+        )}
+
+        {/* ABA: META */}
+        {activeTab === 'meta' && (
+          <MetaView vendedorNome={currentUser?.nome} />
+        )}
+
+        {/* ABA: MAIS (CONTA, CLIENTES, PIN) */}
+        {activeTab === 'mais' && (
+          <MaisView
+            currentUser={currentUser}
+            onUpdateUser={(u) => setCurrentUser((prev) => ({ ...prev, ...u }))}
+            clientes={clientes}
+            onClienteCreated={(c) => {
+              setClientes((prev) => [c, ...prev])
+              showToast(`Cliente ${c.razao_social} cadastrado!`)
+            }}
+            empresaAtiva={empresaAtiva}
+            empresasCount={empresasDisponiveis.length}
+            onSwitchEmpresa={() => setSwitchModalOpen(true)}
+            onLogout={handleLogout}
+          />
+        )}
+      </div>
+
+      {/* Barra Inferior no Mobile */}
+      <MobileBottomNav
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        cartCount={cartCount}
+      />
 
       {/* Drawer do Carrinho / Pedido */}
       <CartDrawer
@@ -384,12 +471,14 @@ export function App() {
         onClose={() => setCartOpen(false)}
         itens={itens}
         onUpdateQty={handleUpdateQty}
+        onUpdateDesconto={handleUpdateDesconto}
         onRemoveItem={handleRemoveItem}
         onClearCart={handleClearCart}
         selectedCliente={selectedCliente}
         onOpenClienteSelect={() => setClienteModalOpen(true)}
         onSubmitOrder={handleSubmitOrder}
         isSubmitting={isSubmitting}
+        limiteDescontoPct={currentUser?.limite_desconto_pct ?? 15}
       />
 
       {/* Modal de Seleção de Cliente */}
@@ -404,7 +493,7 @@ export function App() {
         }}
       />
 
-      {/* Modal de Alternar Empresa (quando o vendedor tem mais de uma) */}
+      {/* Modal de Alternar Empresa */}
       {switchModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl">

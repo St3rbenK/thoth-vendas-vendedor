@@ -1,5 +1,16 @@
 import { get, set, del } from 'idb-keyval'
-import type { Produto, Categoria, Cliente, TabelaPreco, ItemCarrinho, EmpresaVinculo, UsuarioVendedor } from '../types'
+import type {
+  Produto,
+  Categoria,
+  Cliente,
+  TabelaPreco,
+  ItemCarrinho,
+  EmpresaVinculo,
+  UsuarioVendedor,
+  Pedido,
+  VendedorMeta,
+  NovoClientePayload,
+} from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://vendas-api.thothfy.com.br'
 
@@ -214,4 +225,76 @@ export async function getMe(): Promise<any> {
   } catch {
     return null
   }
+}
+
+// 7. Pedidos do Vendedor (com Fallback Offline)
+export async function getPedidos(status?: string): Promise<Pedido[]> {
+  try {
+    const url = status && status !== 'todos' ? `/api/pedidos?vendedorId=me&status=${status}` : '/api/pedidos?vendedorId=me'
+    const data = await fetchWithAuth(url)
+    const list: Pedido[] = data.pedidos || []
+    if (list.length > 0) {
+      await set('offline_pedidos', list)
+    }
+    return list
+  } catch (err) {
+    const cached = await get<Pedido[]>('offline_pedidos')
+    return cached || []
+  }
+}
+
+export async function getPedidoDetalhes(id: string): Promise<Pedido | null> {
+  try {
+    const data = await fetchWithAuth(`/api/pedidos/${id}`)
+    return data.pedido || null
+  } catch {
+    return null
+  }
+}
+
+// 8. Meta e Desempenho do Vendedor
+export async function getVendedorMeta(): Promise<VendedorMeta | null> {
+  try {
+    const data = await fetchWithAuth('/api/vendedor/meta')
+    if (data && data.meta) {
+      await set('offline_vendedor_meta', data.meta)
+      return data.meta
+    }
+    return null
+  } catch (err) {
+    const cached = await get<VendedorMeta>('offline_vendedor_meta')
+    return cached || null
+  }
+}
+
+// 9. Cadastro de Novo Cliente (vinculado ao vendedor e sincronizado com ERP)
+export async function criarCliente(payload: NovoClientePayload): Promise<Cliente> {
+  const data = await fetchWithAuth('/api/clientes', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  if (!data || !data.cliente) {
+    throw new Error(data?.error || 'Erro ao cadastrar cliente')
+  }
+
+  // Atualiza cache offline de clientes
+  const clientes = (await get<Cliente[]>('offline_clientes')) || []
+  const updated = [data.cliente, ...clientes.filter((c) => c.id !== data.cliente.id)]
+  await set('offline_clientes', updated)
+
+  return data.cliente
+}
+
+// 10. Atualização de Perfil e PIN de Segurança do Vendedor
+export async function updateVendedorPerfil(dados: {
+  nome?: string
+  email?: string
+  telefone?: string
+  pin?: string
+}): Promise<{ ok: boolean; message?: string; user?: UsuarioVendedor }> {
+  const data = await fetchWithAuth('/api/vendedor/perfil', {
+    method: 'PUT',
+    body: JSON.stringify(dados),
+  })
+  return data
 }

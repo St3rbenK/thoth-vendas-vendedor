@@ -8,12 +8,14 @@ interface CartDrawerProps {
   onClose: () => void
   itens: ItemCarrinho[]
   onUpdateQty: (produtoId: string, quantidade: number) => void
+  onUpdateDesconto?: (produtoId: string, descontoPct: number) => void
   onRemoveItem: (produtoId: string) => void
   onClearCart: () => void
   selectedCliente: Cliente | null
   onOpenClienteSelect: () => void
   onSubmitOrder: (observacoes: string, condicao: string) => Promise<void>
   isSubmitting: boolean
+  limiteDescontoPct?: number
 }
 
 const CONDICOES_PAGAMENTO = [
@@ -34,22 +36,34 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onClose,
   itens,
   onUpdateQty,
+  onUpdateDesconto,
   onRemoveItem,
   onClearCart,
   selectedCliente,
   onOpenClienteSelect,
   onSubmitOrder,
   isSubmitting,
+  limiteDescontoPct = 15,
 }) => {
   const [condicao, setCondicao] = useState<string>('À Vista')
   const [observacoes, setObservacoes] = useState<string>('')
+  const [descontoGlobal, setDescontoGlobal] = useState<number>(0)
 
   if (!isOpen) return null
 
-  const subtotal = itens.reduce((acc, it) => acc + it.subtotal, 0)
-  const total = subtotal
+  const subtotal = itens.reduce((acc, it) => acc + (it.quantidade * it.precoUnitarioCobrado), 0)
+  const totalDesconto = itens.reduce((acc, it) => acc + (it.quantidade * it.precoUnitarioCobrado * (it.descontoPct / 100)), 0)
+  const total = subtotal - totalDesconto
   const subtotalFmt = subtotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
   const totalFmt = total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+  const handleApplyDescontoGlobal = (pct: number) => {
+    const capped = Math.min(Math.max(0, pct), limiteDescontoPct)
+    setDescontoGlobal(capped)
+    if (onUpdateDesconto) {
+      itens.forEach((it) => onUpdateDesconto(it.produtoId, capped))
+    }
+  }
 
   const handleWhatsApp = () => {
     const texto = formatarWhatsApp(selectedCliente, itens, condicao, total, observacoes)
@@ -153,6 +167,57 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             </select>
           </div>
 
+          {/* Desconto Geral no Pedido */}
+          {itens.length > 0 && (
+            <div className="rounded-2xl border border-teal-200 bg-teal-50/70 p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-teal-950 block">Desconto Geral no Pedido</span>
+                  <span className="text-[10px] text-teal-700 font-medium">
+                    Seu limite autorizado: <strong className="font-bold">{limiteDescontoPct}%</strong>
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="0"
+                    max={limiteDescontoPct}
+                    step="0.5"
+                    value={descontoGlobal || ''}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0
+                      handleApplyDescontoGlobal(val)
+                    }}
+                    placeholder="0"
+                    className="w-16 px-2 py-1 rounded-xl border border-teal-300 bg-white text-center text-xs font-black font-mono text-teal-900 focus:outline-teal-500 shadow-sm"
+                  />
+                  <span className="text-xs font-bold text-teal-900">%</span>
+                </div>
+              </div>
+
+              {/* Atalhos Rápidos de Desconto */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] text-teal-800 font-semibold">Atalhos:</span>
+                {[0, 3, 5, 7, 10, limiteDescontoPct]
+                  .filter((v, idx, arr) => arr.indexOf(v) === idx && v <= limiteDescontoPct)
+                  .map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      onClick={() => handleApplyDescontoGlobal(pct)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                        descontoGlobal === pct
+                          ? 'bg-teal-700 text-white shadow-sm ring-2 ring-teal-400'
+                          : 'bg-white text-teal-800 border border-teal-300/80 hover:bg-teal-100/60'
+                      }`}
+                    >
+                      {pct === 0 ? 'Sem desc.' : pct === limiteDescontoPct ? `Máx (${pct}%)` : `${pct}%`}
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
           {/* Lista de Itens */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -181,8 +246,33 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       <p className="text-[11px] text-slate-500">
                         #{it.codigo} • {it.precoUnitarioCobrado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/{it.unidade}
                       </p>
-                      <p className="text-xs font-black text-teal-800 mt-0.5">
-                        {it.subtotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      
+                      {/* Desconto por Item */}
+                      <div className="mt-1 flex items-center gap-1.5 text-[11px]">
+                        <span className="text-slate-400">Desc:</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max={limiteDescontoPct}
+                          value={it.descontoPct || ''}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0
+                            const capped = Math.min(Math.max(0, val), limiteDescontoPct)
+                            if (onUpdateDesconto) onUpdateDesconto(it.produtoId, capped)
+                          }}
+                          placeholder="0"
+                          className="w-12 px-1.5 py-0.5 rounded border border-slate-200 text-center text-xs font-bold font-mono focus:outline-teal-500"
+                        />
+                        <span className="text-slate-400">% (máx {limiteDescontoPct}%)</span>
+                      </div>
+
+                      <p className="text-xs font-black text-teal-800 mt-1">
+                        {(it.quantidade * it.precoUnitarioCobrado * (1 - (it.descontoPct || 0) / 100)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        {it.descontoPct > 0 && (
+                          <span className="text-[10px] text-teal-600 font-bold ml-1.5">
+                            (-{it.descontoPct}%)
+                          </span>
+                        )}
                       </p>
                     </div>
 
@@ -235,9 +325,21 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
         {/* Rodapé Fixo do Carrinho com Totais e Ações */}
         <div className="border-t border-slate-200 bg-slate-50 p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Total do Pedido</span>
-            <span className="text-xl font-black text-[#0F3C46]">{totalFmt}</span>
+          <div className="space-y-1 text-xs">
+            <div className="flex items-center justify-between text-slate-500">
+              <span>Subtotal</span>
+              <span>{subtotalFmt}</span>
+            </div>
+            {totalDesconto > 0 && (
+              <div className="flex items-center justify-between text-teal-700 font-bold">
+                <span>Desconto Aplicado</span>
+                <span>- {totalDesconto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between pt-1 border-t border-slate-200">
+              <span className="font-bold uppercase tracking-wider text-slate-700">Total do Pedido</span>
+              <span className="text-xl font-black text-[#0F3C46]">{totalFmt}</span>
+            </div>
           </div>
 
           {/* Botão Primário: Transmitir */}
