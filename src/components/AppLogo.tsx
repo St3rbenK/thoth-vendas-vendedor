@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useId } from 'react'
 
 export type ProductId = 'fy' | 'vendas' | 'erp' | 'pontua' | 'whats' | 'mail' | 'vet' | 'pdv' | 'admin'
 export type LogoSize = 'sm' | 'md' | 'lg'
@@ -106,7 +106,11 @@ export const AppLogo: React.FC<AppLogoProps> = ({
   variant = 'light',
   className = '',
 }) => {
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '')
   const config = PRODUCTS[product] || PRODUCTS.vendas
+  const gradId = `app-grad-${config.id}-${uid}`
+  const glowId = `app-glow-${config.id}-${uid}`
+  const shadowId = `app-shadow-${config.id}-${uid}`
 
   const iconSizeClass =
     size === 'sm'
@@ -133,21 +137,21 @@ export const AppLogo: React.FC<AppLogoProps> = ({
       >
         <svg viewBox="0 0 56 56" className="w-full h-full block" fill="none">
           <defs>
-            <linearGradient id={`app-grad-${config.id}`} x1="0%" y1="0%" x2="0%" y2="100%">
+            <linearGradient id={gradId} x1="0%" y1="0%" x2="0%" y2="100%">
               <stop offset="0%" stopColor={config.primary} />
               <stop offset="100%" stopColor={config.secondary} />
             </linearGradient>
-            <radialGradient id={`app-glow-${config.id}`} cx="50%" cy="0%" r="70%">
+            <radialGradient id={glowId} cx="50%" cy="0%" r="70%">
               <stop offset="0%" stopColor="#ffffff" stopOpacity="0.25" />
               <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
             </radialGradient>
-            <filter id={`app-shadow-${config.id}`} x="-20%" y="-20%" width="140%" height="140%">
+            <filter id={shadowId} x="-20%" y="-20%" width="140%" height="140%">
               <feDropShadow dx="0" dy="2" stdDeviation="2.5" floodColor="#000000" floodOpacity="0.20" />
             </filter>
           </defs>
 
-          <rect width="56" height="56" rx="13" ry="13" fill={`url(#app-grad-${config.id})`} />
-          <rect width="56" height="56" rx="13" ry="13" fill={`url(#app-glow-${config.id})`} />
+          <rect width="56" height="56" rx="13" ry="13" fill={`url(#${gradId})`} />
+          <rect width="56" height="56" rx="13" ry="13" fill={`url(#${glowId})`} />
           <rect
             width="54"
             height="54"
@@ -160,7 +164,7 @@ export const AppLogo: React.FC<AppLogoProps> = ({
             strokeOpacity="0.22"
             strokeWidth="1"
           />
-          <g filter={`url(#app-shadow-${config.id})`}>
+          <g filter={`url(#${shadowId})`}>
             <g
               transform="translate(28, 28) scale(0.0059451, -0.0059451) translate(-3828.5, -5154.0)"
               fill="#ffffff"

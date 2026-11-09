@@ -13,6 +13,7 @@ import {
   CheckCircle2,
 } from 'lucide-react'
 import { getVendedorMeta } from '../services/api'
+import { AppLogo } from './AppLogo'
 import type { VendedorMeta } from '../types'
 
 export function MetaView({ vendedorNome }: { vendedorNome?: string }) {
@@ -59,7 +60,18 @@ export function MetaView({ vendedorNome }: { vendedorNome?: string }) {
   const isMetaBatida = pct >= 100 && metaMensal > 0
 
   return (
-    <div className="mx-auto max-w-5xl px-3 py-4 sm:px-6 sm:py-6">
+    <div className="w-full">
+      {/* Top Bar Mobile com Logo Padrão */}
+      <header className="sticky top-0 z-20 bg-[#0F3C46] text-white shadow-sm md:hidden">
+        <div className="flex items-center justify-between gap-2 px-4 py-3">
+          <AppLogo product="vendas" size="sm" showText={true} variant="dark" />
+          <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold text-teal-200">
+            Minha Meta
+          </span>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-5xl px-3 py-4 sm:px-6 sm:py-6">
       {/* Título */}
       <div className="mb-6">
         <div className="flex items-center gap-2 text-teal-600 font-bold text-xs uppercase tracking-wider">
@@ -231,6 +243,7 @@ export function MetaView({ vendedorNome }: { vendedorNome?: string }) {
             Nenhuma venda registrada nos últimos dias ainda. Emita seu primeiro pedido no catálogo!
           </div>
         )}
+      </div>
       </div>
     </div>
   )

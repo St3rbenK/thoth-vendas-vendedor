@@ -269,11 +269,11 @@ export function MaisView({
                 <ArrowLeft className="h-5 w-5" />
               </button>
             ) : (
-              <AppLogo product="vendas" size="sm" showText={false} variant="dark" />
+              <AppLogo product="vendas" size="sm" showText={true} variant="dark" />
             )}
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-base sm:text-lg font-extrabold tracking-tight leading-tight">
-                {screenTitle[screen].title}
+              <h1 className="truncate text-sm sm:text-base font-extrabold tracking-tight leading-tight">
+                {screen === 'menu' ? '• Configurações' : screenTitle[screen].title}
               </h1>
               <p className="truncate text-[11px] text-teal-200/90">
                 {screenTitle[screen].subtitle}

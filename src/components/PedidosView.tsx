@@ -27,6 +27,7 @@ import {
 } from '../services/api'
 import type { Pedido, OrcamentoSalvo } from '../types'
 import { formatarWhatsApp, abrirWhatsApp, gerarPdfPedido } from '../services/share'
+import { AppLogo } from './AppLogo'
 import jsPDF from 'jspdf'
 
 interface PedidosViewProps {
@@ -286,7 +287,18 @@ export function PedidosView({
   const fmtBRL = (val: number) => Number(val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
   return (
-    <div className="mx-auto max-w-5xl w-full px-3 py-4 sm:px-6 sm:py-6 space-y-5">
+    <div className="w-full">
+      {/* Top Bar Mobile com Logo Padrão */}
+      <header className="sticky top-0 z-20 bg-[#0F3C46] text-white shadow-sm md:hidden">
+        <div className="flex items-center justify-between gap-2 px-4 py-3">
+          <AppLogo product="vendas" size="sm" showText={true} variant="dark" />
+          <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-bold text-teal-200">
+            Pedidos & Orçamentos
+          </span>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-5xl w-full px-3 py-4 sm:px-6 sm:py-6 space-y-5">
       {/* Título e Busca */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -720,6 +732,7 @@ export function PedidosView({
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }
