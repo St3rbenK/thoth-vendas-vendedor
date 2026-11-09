@@ -1,9 +1,13 @@
 import React from 'react'
-import { ShoppingCart, Search, X, WifiOff, Store } from 'lucide-react'
+import { ShoppingCart, Search, X, WifiOff, Store, LogOut, Building2, User } from 'lucide-react'
 import type { Categoria } from '../types'
 
 interface HeaderProps {
   storeName: string
+  vendedorNome?: string
+  empresasCount?: number
+  onSwitchEmpresa?: () => void
+  onLogout?: () => void
   search: string
   setSearch: (v: string) => void
   categories: Categoria[]
@@ -17,6 +21,10 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   storeName,
+  vendedorNome,
+  empresasCount = 1,
+  onSwitchEmpresa,
+  onLogout,
   search,
   setSearch,
   categories,
@@ -38,26 +46,54 @@ export const Header: React.FC<HeaderProps> = ({
             <Store className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-bold leading-tight sm:text-lg">{storeName || 'Thoth Vendas'}</h1>
-            <p className="truncate text-[11px] text-teal-200">Catálogo & Força de Vendas</p>
+            <div className="flex items-center gap-2">
+              <h1 className="truncate text-base font-bold leading-tight sm:text-lg">{storeName || 'Thoth Vendas'}</h1>
+              {empresasCount > 1 && onSwitchEmpresa && (
+                <button
+                  type="button"
+                  onClick={onSwitchEmpresa}
+                  className="flex items-center gap-1 rounded-md bg-teal-400/20 px-1.5 py-0.5 text-[10px] font-bold text-teal-200 hover:bg-teal-400/30 transition-all border border-teal-300/30 shrink-0"
+                  title="Trocar de empresa"
+                >
+                  <Building2 className="h-3 w-3" />
+                  <span>Trocar</span>
+                </button>
+              )}
+            </div>
+            <p className="truncate text-[11px] text-teal-200 flex items-center gap-1.5">
+              <User className="h-3 w-3 inline text-teal-300" />
+              <span>{vendedorNome || 'Representante'}</span>
+            </p>
           </div>
         </div>
 
-        {/* Botão do Carrinho no Topo */}
-        <button
-          onClick={onOpenCart}
-          className="relative flex shrink-0 items-center gap-2 rounded-xl bg-teal-500 px-3.5 py-2.5 text-sm font-bold text-white transition-all active:scale-95 hover:bg-teal-400"
-          aria-label="Abrir Pedido"
-        >
-          <ShoppingCart className="h-4 w-4" />
-          <span className="hidden sm:inline">Pedido</span>
-          <span className="sm:hidden text-xs">{totalFmt}</span>
-          {cartCount > 0 && (
-            <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400 px-1 text-[11px] font-black text-slate-900 shadow">
-              {cartCount}
-            </span>
+        {/* Ações da direita: Botão Pedido + Logout */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={onOpenCart}
+            className="relative flex items-center gap-2 rounded-xl bg-teal-500 px-3.5 py-2.5 text-sm font-bold text-white transition-all active:scale-95 hover:bg-teal-400"
+            aria-label="Abrir Pedido"
+          >
+            <ShoppingCart className="h-4 w-4" />
+            <span className="hidden sm:inline">Pedido</span>
+            <span className="sm:hidden text-xs">{totalFmt}</span>
+            {cartCount > 0 && (
+              <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400 px-1 text-[11px] font-black text-slate-900 shadow">
+                {cartCount}
+              </span>
+            )}
+          </button>
+
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-teal-200 hover:bg-white/20 hover:text-white transition-all active:scale-95"
+              title="Sair do App"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           )}
-        </button>
+        </div>
       </div>
 
       {/* Busca & Categorias */}

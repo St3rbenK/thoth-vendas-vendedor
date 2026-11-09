@@ -68,3 +68,21 @@ export interface CondicaoPagamentoOption {
   codigo: string
   nome: string
 }
+
+export interface EmpresaVinculo {
+  empresa_id: string
+  slug: string
+  razao_social: string
+  nome_fantasia?: string
+  cnpj?: string
+  logo_url?: string
+  role: string
+  ativa: boolean
+}
+
+export interface UsuarioVendedor {
+  id: string
+  nome: string
+  email: string
+  cpf?: string
+}

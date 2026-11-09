@@ -1,9 +1,9 @@
-import { get, set } from 'idb-keyval'
-import type { Produto, Categoria, Cliente, TabelaPreco, ItemCarrinho } from '../types'
+import { get, set, del } from 'idb-keyval'
+import type { Produto, Categoria, Cliente, TabelaPreco, ItemCarrinho, EmpresaVinculo, UsuarioVendedor } from '../types'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://vendas-api.72.60.53.223.nip.io'
+const API_BASE = import.meta.env.VITE_API_URL || 'https://vendas-api.thothfy.com.br'
 
-function getToken(): string | null {
+export function getToken(): string | null {
   const match = document.cookie.match(/(?:^|;\s*)thoth_vendas_token=([^;]+)/)
   if (match) return decodeURIComponent(match[1])
   return localStorage.getItem('thoth_vendas_token')
@@ -11,7 +11,7 @@ function getToken(): string | null {
 
 export function setToken(token: string) {
   localStorage.setItem('thoth_vendas_token', token)
-  document.cookie = `thoth_vendas_token=${encodeURIComponent(token)}; path=/; max-age=604800; SameSite=Lax`
+  document.cookie = `thoth_vendas_token=${encodeURIComponent(token)}; path=/; max-age=2592000; SameSite=Lax`
 }
 
 export function clearToken() {
@@ -19,7 +19,7 @@ export function clearToken() {
   document.cookie = 'thoth_vendas_token=; path=/; max-age=-1'
 }
 
-async function fetchWithAuth(endpoint: string, options: RequestInit = {}): Promise<any> {
+export async function fetchWithAuth(endpoint: string, options: RequestInit = {}): Promise<any> {
   const token = getToken()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -36,12 +36,8 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}): Promi
   })
 
   if (res.status === 401) {
-    // Redirecionamento transparente ao Authentik se não autenticado
-    const isLocal = window.location.search.includes('local=1')
-    if (!isLocal) {
-      window.location.href = `${API_BASE}/api/auth/oidc/start?target=${encodeURIComponent(window.location.pathname)}`
-    }
-    throw new Error('Sessão expirada')
+    clearToken()
+    throw new Error('Sessão expirada. Faça login com seu CPF e PIN.')
   }
 
   if (!res.ok) {
@@ -50,6 +46,68 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}): Promi
   }
 
   return res.json()
+}
+
+// Autenticação de Vendedor (CPF + PIN)
+export interface LoginResponse {
+  ok: boolean
+  requerSelecaoEmpresa?: boolean
+  token?: string
+  user: UsuarioVendedor
+  empresaAtiva?: EmpresaVinculo
+  empresas: EmpresaVinculo[]
+  error?: string
+}
+
+export async function loginVendedor(cpf: string, pin: string): Promise<LoginResponse> {
+  const res = await fetch(`${API_BASE}/api/auth/vendedor/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cpf, pin }),
+    credentials: 'include',
+  })
+
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Falha ao autenticar. Verifique o CPF e o PIN.')
+  }
+
+  if (data.token && !data.requerSelecaoEmpresa) {
+    setToken(data.token)
+  }
+
+  return data
+}
+
+export async function selecionarEmpresa(empresaId: string, tempToken?: string): Promise<LoginResponse> {
+  const token = tempToken || getToken() || ''
+  const res = await fetch(`${API_BASE}/api/auth/vendedor/selecionar-empresa`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ empresaId, token }),
+    credentials: 'include',
+  })
+
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Falha ao selecionar empresa.')
+  }
+
+  if (data.token) {
+    setToken(data.token)
+  }
+
+  return data
+}
+
+export function logoutVendedor() {
+  clearToken()
+  localStorage.removeItem('vendedor_carrinho')
+  localStorage.removeItem('vendedor_cliente')
+  window.location.reload()
 }
 
 // 1. Produtos com Fallback Offline
@@ -139,7 +197,6 @@ export async function enviarPedido(payload: CriarPedidoPayload): Promise<any> {
     })
     return data
   } catch (err) {
-    // Se offline, enfileira para sincronização posterior
     if (!navigator.onLine) {
       const queue = (await get<any[]>('pending_orders_queue')) || []
       queue.push({ ...payload, queuedAt: new Date().toISOString() })
