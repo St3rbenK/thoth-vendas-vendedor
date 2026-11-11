@@ -29,7 +29,7 @@ import {
   Download,
   Smartphone,
 } from 'lucide-react'
-import { criarCliente, updateVendedorPerfil } from '../services/api'
+import { consultarCnpj, criarCliente, updateVendedorPerfil } from '../services/api'
 import { AppLogo } from './AppLogo'
 import type { Cliente, UsuarioVendedor, EmpresaVinculo, NovoClientePayload, TabelaPreco } from '../types'
 import type { ThemeMode } from '../hooks/useTheme'
@@ -105,8 +105,49 @@ export function MaisView({
   const [clienteSearch, setClienteSearch] = useState('')
   const [salvandoCliente, setSalvandoCliente] = useState(false)
   const [buscandoCep, setBuscandoCep] = useState(false)
+  const [buscandoCnpj, setBuscandoCnpj] = useState(false)
+  const [lastLookedUpCnpj, setLastLookedUpCnpj] = useState('')
   const [sincronizando, setSincronizando] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+
+  const handleCpfCnpjInputChange = async (raw: string) => {
+    const formatted = formatCpfCnpjInput(raw)
+    const digits = formatted.replace(/\D/g, '')
+    setClienteForm((prev) => ({ ...prev, cpf_cnpj: formatted }))
+    if (digits.length === 14 && digits !== lastLookedUpCnpj && !buscandoCnpj) {
+      setLastLookedUpCnpj(digits)
+      setBuscandoCnpj(true)
+      try {
+        const dados = await consultarCnpj(digits)
+        if (dados) {
+          setClienteForm((prev) => ({
+            ...prev,
+            razao_social: dados.razao_social || prev.razao_social,
+            nome_fantasia: dados.nome_fantasia || prev.nome_fantasia,
+            inscricao_estadual: dados.inscricao_estadual || prev.inscricao_estadual,
+            email: dados.email || prev.email,
+            telefone: dados.telefone ? formatPhoneInput(dados.telefone) : prev.telefone,
+            cep: dados.cep
+              ? dados.cep.length > 5
+                ? `${dados.cep.slice(0, 5)}-${dados.cep.slice(5, 8)}`
+                : dados.cep
+              : prev.cep,
+            logradouro: dados.logradouro || prev.logradouro,
+            numero: dados.numero || prev.numero,
+            complemento: dados.complemento || prev.complemento,
+            bairro: dados.bairro || prev.bairro,
+            cidade: dados.cidade || prev.cidade,
+            estado: dados.estado || prev.estado,
+          }))
+          triggerToast('Dados preenchidos automaticamente pelo CNPJ!')
+        }
+      } catch {
+        // Silencioso
+      } finally {
+        setBuscandoCnpj(false)
+      }
+    }
+  }
 
   useEffect(() => {
     if (autoOpenNewClient) {
@@ -296,7 +337,15 @@ export function MaisView({
     )
   })
 
-  const limiteDesconto = currentUser?.limite_desconto_pct ?? 15
+  const companyDescontoMax = empresaAtiva?.desconto_maximo_vendedor_pct ?? 15
+  const userDescontoMax = currentUser?.limite_desconto_pct
+  const limiteDesconto =
+    userDescontoMax !== undefined &&
+    userDescontoMax !== null &&
+    userDescontoMax > 0 &&
+    (userDescontoMax !== 15 || companyDescontoMax === 15)
+      ? userDescontoMax
+      : companyDescontoMax
   const initials =
     (currentUser?.nome || 'Vendedor')
       .trim()
@@ -855,17 +904,22 @@ export function MaisView({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    CPF ou CNPJ *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300">
+                      CPF ou CNPJ *
+                    </label>
+                    {buscandoCnpj && (
+                      <span className="text-[10px] font-semibold text-[#00A19C] flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Consultando...
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     required
                     value={clienteForm.cpf_cnpj}
-                    onChange={(e) =>
-                      setClienteForm({ ...clienteForm, cpf_cnpj: formatCpfCnpjInput(e.target.value) })
-                    }
-                    placeholder="00.000.000/0000-00"
+                    onChange={(e) => void handleCpfCnpjInputChange(e.target.value)}
+                    placeholder="Digite o CNPJ para preencher"
                     className={`${inputClass} font-mono tabular-nums`}
                   />
                 </div>

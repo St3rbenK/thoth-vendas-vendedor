@@ -929,6 +929,61 @@ export async function atualizarCliente(id: string, payload: Partial<NovoClienteP
   return data.cliente
 }
 
+export interface CnpjLookupDados {
+  cnpj: string
+  razao_social: string
+  nome_fantasia?: string
+  inscricao_estadual?: string
+  email?: string
+  telefone?: string
+  cep?: string
+  logradouro?: string
+  numero?: string
+  complemento?: string
+  bairro?: string
+  cidade?: string
+  estado?: string
+  source?: string
+}
+
+export async function consultarCnpj(cnpj: string): Promise<CnpjLookupDados | null> {
+  const digits = cnpj.replace(/\D/g, '')
+  if (digits.length !== 14) return null
+
+  try {
+    const data = await fetchWithAuth(`/api/consulta-cnpj/${digits}`)
+    if (data && data.ok && data.dados) {
+      return data.dados as CnpjLookupDados
+    }
+  } catch {
+    // Fallback direto na BrasilAPI se o servidor estiver offline ou indisponível
+  }
+
+  try {
+    const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${digits}`)
+    if (!res.ok) return null
+    const m = await res.json()
+    if (!m || !m.razao_social) return null
+    return {
+      cnpj: digits,
+      razao_social: m.razao_social || '',
+      nome_fantasia: m.nome_fantasia || '',
+      email: (m.email || '').toLowerCase(),
+      telefone: (m.ddd_telefone_1 || '').replace(/\D/g, ''),
+      cep: (m.cep || '').replace(/\D/g, ''),
+      logradouro: m.logradouro || '',
+      numero: m.numero || '',
+      complemento: m.complemento || '',
+      bairro: m.bairro || '',
+      cidade: m.municipio || '',
+      estado: (m.uf || '').toUpperCase(),
+      source: 'brasilapi',
+    }
+  } catch {
+    return null
+  }
+}
+
 // 11. Atualização de Perfil e PIN de Segurança do Vendedor
 export async function updateVendedorPerfil(dados: {
   nome?: string

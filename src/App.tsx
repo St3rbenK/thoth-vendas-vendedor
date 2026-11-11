@@ -637,8 +637,15 @@ export function App() {
   const cartCount = itens.reduce((acc, it) => acc + it.quantidade, 0)
   const cartTotalFmt = cartTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
+  const companyDescontoMax = empresaAtiva?.desconto_maximo_vendedor_pct ?? 15
+  const userDescontoMax = currentUser?.limite_desconto_pct
   const limiteDescontoEfetivo =
-    currentUser?.limite_desconto_pct || empresaAtiva?.desconto_maximo_vendedor_pct || 15
+    userDescontoMax !== undefined &&
+    userDescontoMax !== null &&
+    userDescontoMax > 0 &&
+    (userDescontoMax !== 15 || companyDescontoMax === 15)
+      ? userDescontoMax
+      : companyDescontoMax
   const activeEmpresaId = empresaAtiva?.empresa_id || empresaAtiva?.id
 
   if (!isAuthenticated) {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'thoth-vendedor-v4'
+const CACHE_NAME = 'thoth-vendedor-v5'
 const SHELL_URLS = [
   '/',
   '/index.html',

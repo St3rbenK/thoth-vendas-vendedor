@@ -13,7 +13,7 @@ import {
   User,
 } from 'lucide-react'
 import type { Cliente, NovoClientePayload, TabelaPreco } from '../types'
-import { atualizarCliente, criarCliente } from '../services/api'
+import { atualizarCliente, consultarCnpj, criarCliente } from '../services/api'
 
 interface NewClientModalProps {
   isOpen: boolean
@@ -109,6 +109,9 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
   const [clienteForm, setClienteForm] = useState<NovoClientePayload>(emptyClienteForm)
   const [salvando, setSalvando] = useState(false)
   const [buscandoCep, setBuscandoCep] = useState(false)
+  const [buscandoCnpj, setBuscandoCnpj] = useState(false)
+  const [cnpjFeedback, setCnpjFeedback] = useState<string | null>(null)
+  const [lastLookedUpCnpj, setLastLookedUpCnpj] = useState<string>('')
   const [formError, setFormError] = useState<string | null>(null)
 
   const isEditing = !!editingCliente
@@ -116,6 +119,8 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
   useEffect(() => {
     if (!isOpen) return
     setFormError(null)
+    setCnpjFeedback(null)
+    setLastLookedUpCnpj('')
     if (editingCliente) {
       setClienteForm(clienteToForm(editingCliente))
     } else {
@@ -124,6 +129,56 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
   }, [isOpen, editingCliente])
 
   if (!isOpen) return null
+
+  const lookupAndFillCnpj = async (cnpjDigits: string) => {
+    if (cnpjDigits.length !== 14 || isEditing || buscandoCnpj) return
+    setLastLookedUpCnpj(cnpjDigits)
+    setBuscandoCnpj(true)
+    setCnpjFeedback(null)
+    try {
+      const dados = await consultarCnpj(cnpjDigits)
+      if (!dados) {
+        setCnpjFeedback('CNPJ não encontrado automaticamente. Preencha os dados manualmente.')
+        return
+      }
+      setClienteForm((prev) => ({
+        ...prev,
+        razao_social: dados.razao_social || prev.razao_social,
+        nome_fantasia: dados.nome_fantasia || prev.nome_fantasia,
+        inscricao_estadual: dados.inscricao_estadual || prev.inscricao_estadual,
+        email: dados.email || prev.email,
+        telefone: dados.telefone ? formatPhoneInput(dados.telefone) : prev.telefone,
+        cep: dados.cep ? formatCepInput(dados.cep) : prev.cep,
+        logradouro: dados.logradouro || prev.logradouro,
+        numero: dados.numero || prev.numero,
+        complemento: dados.complemento || prev.complemento,
+        bairro: dados.bairro || prev.bairro,
+        cidade: dados.cidade || prev.cidade,
+        estado: dados.estado || prev.estado,
+      }))
+      setCnpjFeedback(
+        dados.inscricao_estadual
+          ? 'Dados da Receita e Inscrição Estadual preenchidos!'
+          : 'Dados da empresa e endereço preenchidos pela Receita!'
+      )
+    } catch {
+      // Falha silenciosa caso sem rede
+    } finally {
+      setBuscandoCnpj(false)
+    }
+  }
+
+  const handleCpfCnpjChange = (val: string) => {
+    const formatted = formatCpfCnpjInput(val)
+    const digits = formatted.replace(/\D/g, '')
+    setClienteForm((prev) => ({ ...prev, cpf_cnpj: formatted }))
+    if (digits.length < 14) {
+      setCnpjFeedback(null)
+    }
+    if (!isEditing && digits.length === 14 && digits !== lastLookedUpCnpj) {
+      void lookupAndFillCnpj(digits)
+    }
+  }
 
   const handleCepChange = async (cepRaw: string) => {
     const limpo = cepRaw.replace(/\D/g, '').slice(0, 8)
@@ -261,9 +316,78 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
 
             {/* 1. Identificação & Dados Fiscais */}
             <div className="space-y-3">
-              <h3 className="font-display font-bold text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider">
-                1. Identificação & Dados Fiscais
-              </h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-display font-bold text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider">
+                  1. Identificação & Dados Fiscais
+                </h3>
+                {buscandoCnpj && (
+                  <span className="text-[11px] font-semibold text-[#00A19C] flex items-center gap-1">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Consultando CNPJ…
+                  </span>
+                )}
+              </div>
+
+              {cnpjFeedback && (
+                <div className="rounded-lg bg-teal-50 dark:bg-[#00A19C]/15 border border-teal-200 dark:border-[#00A19C]/30 px-3 py-2 text-[11px] font-medium text-[#0F766E] dark:text-teal-300">
+                  {cnpjFeedback}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-slate-700 dark:text-slate-300">
+                      CPF ou CNPJ *
+                    </label>
+                    {!isEditing && clienteForm.cpf_cnpj.replace(/\D/g, '').length === 14 && (
+                      <button
+                        type="button"
+                        disabled={buscandoCnpj}
+                        onClick={() => void lookupAndFillCnpj(clienteForm.cpf_cnpj.replace(/\D/g, ''))}
+                        className="text-[10px] font-semibold text-[#00A19C] hover:underline disabled:opacity-50"
+                      >
+                        {buscandoCnpj ? 'Buscando...' : 'Buscar CNPJ'}
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    disabled={isEditing}
+                    inputMode="numeric"
+                    value={clienteForm.cpf_cnpj}
+                    onChange={(e) => handleCpfCnpjChange(e.target.value)}
+                    placeholder="Digite o CNPJ para preencher"
+                    className={`${inputClass} font-mono tabular-nums disabled:opacity-60`}
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                      <FileText className="h-3.5 w-3.5 text-[#00A19C]" /> Inscrição Estadual
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setClienteForm({ ...clienteForm, inscricao_estadual: 'ISENTO' })}
+                      className="text-[10px] font-semibold text-[#00A19C] hover:underline"
+                    >
+                      Marcar ISENTO
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={clienteForm.inscricao_estadual || ''}
+                    onChange={(e) =>
+                      setClienteForm({
+                        ...clienteForm,
+                        inscricao_estadual: e.target.value.toUpperCase(),
+                      })
+                    }
+                    placeholder="Número IE ou ISENTO"
+                    className={`${inputClass} font-mono tabular-nums`}
+                  />
+                </div>
+              </div>
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -302,52 +426,6 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
                     onChange={(e) => setClienteForm({ ...clienteForm, contato_nome: e.target.value })}
                     placeholder="Nome do comprador ou responsável"
                     className={inputClass}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    CPF ou CNPJ *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    disabled={isEditing}
-                    inputMode="numeric"
-                    value={clienteForm.cpf_cnpj}
-                    onChange={(e) =>
-                      setClienteForm({ ...clienteForm, cpf_cnpj: formatCpfCnpjInput(e.target.value) })
-                    }
-                    placeholder="00.000.000/0000-00"
-                    className={`${inputClass} font-mono tabular-nums disabled:opacity-60`}
-                  />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
-                      <FileText className="h-3.5 w-3.5 text-[#00A19C]" /> Inscrição Estadual
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setClienteForm({ ...clienteForm, inscricao_estadual: 'ISENTO' })}
-                      className="text-[10px] font-semibold text-[#00A19C] hover:underline"
-                    >
-                      Marcar ISENTO
-                    </button>
-                  </div>
-                  <input
-                    type="text"
-                    value={clienteForm.inscricao_estadual || ''}
-                    onChange={(e) =>
-                      setClienteForm({
-                        ...clienteForm,
-                        inscricao_estadual: e.target.value.toUpperCase(),
-                      })
-                    }
-                    placeholder="Número IE ou ISENTO"
-                    className={`${inputClass} font-mono tabular-nums`}
                   />
                 </div>
               </div>

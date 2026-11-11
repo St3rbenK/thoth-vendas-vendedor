@@ -488,7 +488,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1 flex-wrap">
-                    {[0, 5, 10, 15, 20, limiteDescontoPct]
+                    {[0, 5, 10, 15, 20, 25, limiteDescontoPct]
                       .filter((v, idx, arr) => v <= limiteDescontoPct && arr.indexOf(v) === idx)
                       .map((pct) => (
                         <button
