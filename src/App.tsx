@@ -518,6 +518,7 @@ export function App() {
       )
     } catch (err: any) {
       setErrorBanner(`Erro ao salvar orçamento: ${err.message || err}`)
+      throw err
     }
   }
 
@@ -605,6 +606,7 @@ export function App() {
       setActiveTab('pedidos')
     } catch (err: any) {
       setErrorBanner(`Falha ao emitir pedido: ${err.message || err}`)
+      throw err
     } finally {
       setIsSubmitting(false)
     }

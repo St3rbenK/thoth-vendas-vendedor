@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   X,
   Trash2,
@@ -105,6 +105,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const [savingOrcamento, setSavingOrcamento] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  const scrollBodyRef = useRef<HTMLDivElement>(null)
 
   const subtotal = itens.reduce((acc, it) => acc + it.quantidade * it.precoUnitarioCobrado, 0)
   const totalDesconto = itens.reduce(
@@ -194,30 +195,39 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     selectedCliente.limite_credito > 0 &&
     selectedCliente.saldo_devedor + total > selectedCliente.limite_credito
 
+  const showDrawerError = (msg: string) => {
+    setFormError(msg)
+    scrollBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   const handleSubmit = async () => {
     setFormError(null)
     if (!selectedCliente) {
-      setFormError('Selecione um cliente antes de transmitir o pedido.')
+      showDrawerError('Selecione um cliente antes de transmitir o pedido.')
       onOpenClienteSelect()
       return
     }
     if (selectedCliente.bloqueado) {
-      setFormError(
+      showDrawerError(
         `Cliente bloqueado${selectedCliente.motivo_bloqueio ? `: ${selectedCliente.motivo_bloqueio}` : ''}. Salve como orçamento ou escolha outro cliente.`
       )
       return
     }
     if (abaixoMinimo) {
-      setFormError(`Valor mínimo do pedido é ${fmtBRL(valorPedidoMinimo)}.`)
+      showDrawerError(`Valor mínimo do pedido é ${fmtBRL(valorPedidoMinimo)}.`)
       return
     }
-    await onSubmitOrder(
-      observacoes,
-      condicao,
-      formaPagamento,
-      formaPagamentoId || undefined,
-      prazoPagamentoId || undefined
-    )
+    try {
+      await onSubmitOrder(
+        observacoes,
+        condicao,
+        formaPagamento,
+        formaPagamentoId || undefined,
+        prazoPagamentoId || undefined
+      )
+    } catch (err: any) {
+      showDrawerError(err?.message || 'Não foi possível transmitir o pedido. Tente novamente.')
+    }
   }
 
   const handleSalvarOrcamentoClick = async () => {
@@ -232,6 +242,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         formaPagamentoId || undefined,
         prazoPagamentoId || undefined
       )
+    } catch (err: any) {
+      showDrawerError(err?.message || 'Não foi possível salvar o orçamento.')
     } finally {
       setSavingOrcamento(false)
     }
@@ -267,7 +279,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         </div>
 
         {/* Corpo com Scroll */}
-        <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-4 bg-[#F8FAFC] dark:bg-[#090D16]">
+        <div
+          ref={scrollBodyRef}
+          className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-4 bg-[#F8FAFC] dark:bg-[#090D16]"
+        >
           {formError && (
             <div
               role="alert"
