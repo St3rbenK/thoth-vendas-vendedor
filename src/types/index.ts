@@ -77,6 +77,9 @@ export interface OrcamentoSalvo {
   pedidoId?: string
   cliente: Cliente | null
   tabelaPrecoId?: string
+  formaPagamentoId?: string
+  prazoPagamentoId?: string
+  formaPagamento?: string
   condicaoPagamento: string
   observacoes: string
   itens: ItemCarrinho[]
@@ -92,15 +95,38 @@ export interface CondicaoPagamentoOption {
   nome: string
 }
 
-export interface EmpresaVinculo {
+export interface FormaPagamento {
+  id: string
   empresa_id: string
+  nome: string
+  tipo: string
+  ativa: boolean
+}
+
+export interface PrazoPagamento {
+  id: string
+  empresa_id: string
+  nome: string
+  dias: number
+  parcelas: number
+  ativo: boolean
+}
+
+export interface EmpresaVinculo {
+  id?: string
+  empresa_id?: string
   slug: string
   razao_social: string
   nome_fantasia?: string
   cnpj?: string
   logo_url?: string
-  role: string
+  role?: string
   ativa: boolean
+  moeda?: string
+  desconto_maximo_vendedor_pct?: number
+  valor_pedido_minimo?: number
+  bloquear_venda_sem_estoque?: boolean
+  permitir_pedido_offline?: boolean
 }
 
 export interface UsuarioVendedor {
@@ -149,9 +175,46 @@ export interface Pedido {
   observacao?: string
   origem: string
   erp_id?: string
+  erp_pedido_id?: string
+  erp_sync_status?: string
+  erp_sync_error?: string
+  comissao_valor?: number
+  last_erp_sync_at?: string
+  data_faturamento?: string
   created_at: string
   updated_at: string
   itens?: ItemPedido[]
+}
+
+export interface CriarPedidoPayload {
+  clienteId: string
+  tabelaPrecoId?: string
+  formaPagamentoId?: string
+  prazoPagamentoId?: string
+  condicaoPagamento?: string
+  formaPagamento?: string
+  status?: 'pendente' | 'orcamento'
+  descontoGeralValor?: number
+  observacoes?: string
+  itens: {
+    produtoId: string
+    quantidade: number
+    precoUnitario: number
+    descontoPct: number
+    descontoValor?: number
+  }[]
+}
+
+export interface PendingOfflineOrder {
+  localId: string
+  clienteNome: string
+  condicaoPagamento: string
+  formaPagamento?: string
+  totalEstimado: number
+  itensResumo: { nome: string; codigo: string; unidade: string; quantidade: number; precoUnitario: number; descontoPct: number }[]
+  queuedAt: string
+  lastError?: string
+  payload: CriarPedidoPayload
 }
 
 export interface VendasDiaPonto {

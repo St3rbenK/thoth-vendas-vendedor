@@ -12,8 +12,10 @@ import {
   BookmarkPlus,
   Percent,
   DollarSign,
+  AlertTriangle,
+  AlertCircle,
 } from 'lucide-react'
-import type { ItemCarrinho, Cliente } from '../types'
+import type { ItemCarrinho, Cliente, FormaPagamento, PrazoPagamento } from '../types'
 import { formatarWhatsApp, abrirWhatsApp, gerarPdfPedido } from '../services/share'
 
 interface CartDrawerProps {
@@ -26,10 +28,26 @@ interface CartDrawerProps {
   onClearCart: () => void
   selectedCliente: Cliente | null
   onOpenClienteSelect: () => void
-  onSubmitOrder: (observacoes: string, condicao: string) => Promise<void>
-  onSaveOrcamento?: (observacoes: string, condicao: string) => Promise<void>
+  onSubmitOrder: (
+    observacoes: string,
+    condicao: string,
+    formaPagamento: string,
+    formaPagamentoId?: string,
+    prazoPagamentoId?: string
+  ) => Promise<void>
+  onSaveOrcamento?: (
+    observacoes: string,
+    condicao: string,
+    formaPagamento: string,
+    formaPagamentoId?: string,
+    prazoPagamentoId?: string
+  ) => Promise<void>
   isSubmitting: boolean
   limiteDescontoPct?: number
+  valorPedidoMinimo?: number
+  empresaNome?: string
+  formasPagamento?: FormaPagamento[]
+  prazosPagamento?: PrazoPagamento[]
 }
 
 const CONDICOES_PAGAMENTO = [
@@ -48,6 +66,14 @@ const CONDICOES_PAGAMENTO = [
   'Cartão de Crédito',
 ]
 
+const FORMAS_PAGAMENTO = [
+  { id: 'boleto', label: 'Boleto Bancário' },
+  { id: 'pix', label: 'PIX' },
+  { id: 'cartao', label: 'Cartão de Crédito/Débito' },
+  { id: 'dinheiro', label: 'Dinheiro / À Vista' },
+  { id: 'transferencia', label: 'Transferência / TED' },
+]
+
 export const CartDrawer: React.FC<CartDrawerProps> = ({
   isOpen,
   onClose,
@@ -62,14 +88,23 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onSaveOrcamento,
   isSubmitting,
   limiteDescontoPct = 15,
+  valorPedidoMinimo = 0,
+  empresaNome = 'ThothVendas',
+  formasPagamento = [],
+  prazosPagamento = [],
 }) => {
   const [condicao, setCondicao] = useState<string>('À Vista')
+  const [formaPagamento, setFormaPagamento] = useState<string>('boleto')
+  const [formaPagamentoId, setFormaPagamentoId] = useState<string>('')
+  const [prazoPagamentoId, setPrazoPagamentoId] = useState<string>('')
   const [observacoes, setObservacoes] = useState<string>('')
   const [modoDescontoGeral, setModoDescontoGeral] = useState<'pct' | 'valor'>('pct')
   const [descontoGlobalPct, setDescontoGlobalPct] = useState<string>('')
   const [descontoGlobalValor, setDescontoGlobalValor] = useState<string>('')
   const [modoItemMap, setModoItemMap] = useState<Record<string, 'pct' | 'valor'>>({})
   const [savingOrcamento, setSavingOrcamento] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [confirmClear, setConfirmClear] = useState(false)
 
   const subtotal = itens.reduce((acc, it) => acc + it.quantidade * it.precoUnitarioCobrado, 0)
   const totalDesconto = itens.reduce(
@@ -84,14 +119,43 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     if (itens.length === 0) {
       setDescontoGlobalPct('')
       setDescontoGlobalValor('')
+      setConfirmClear(false)
     }
   }, [itens.length])
+
+  useEffect(() => {
+    if (selectedCliente) {
+      setFormError(null)
+    }
+  }, [selectedCliente])
+
+  useEffect(() => {
+    if (formasPagamento.length > 0 && !formaPagamentoId) {
+      setFormaPagamentoId(formasPagamento[0].id)
+      setFormaPagamento(formasPagamento[0].tipo || formasPagamento[0].nome)
+    }
+  }, [formasPagamento, formaPagamentoId])
+
+  useEffect(() => {
+    if (prazosPagamento.length > 0 && !prazoPagamentoId) {
+      setPrazoPagamentoId(prazosPagamento[0].id)
+      setCondicao(prazosPagamento[0].nome)
+    }
+  }, [prazosPagamento, prazoPagamentoId])
 
   if (!isOpen) return null
 
   const fmtBRL = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
-  // Aplica desconto geral em % sobre todos os itens
+  const handleCondicaoChange = (novaCondicao: string) => {
+    setCondicao(novaCondicao)
+    const lower = novaCondicao.toLowerCase()
+    if (lower.includes('pix')) setFormaPagamento('pix')
+    else if (lower.includes('cartão') || lower.includes('cartao')) setFormaPagamento('cartao')
+    else if (lower.includes('boleto')) setFormaPagamento('boleto')
+    else if (lower.includes('vista')) setFormaPagamento('dinheiro')
+  }
+
   const handleApplyDescontoPct = (pctRaw: number) => {
     const capped = Math.min(Math.max(0, pctRaw), limiteDescontoPct)
     setDescontoGlobalPct(capped > 0 ? String(Number(capped.toFixed(2))) : '')
@@ -102,7 +166,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     }
   }
 
-  // Aplica desconto geral em R$ (Valor) rateando proporcionalmente nos itens até o limite
   const handleApplyDescontoValor = (valorRaw: number) => {
     if (subtotal <= 0) return
     const cappedVal = Math.min(Math.max(0, valorRaw), maxDescontoValor)
@@ -115,28 +178,60 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   }
 
   const handleWhatsApp = () => {
-    const texto = formatarWhatsApp(selectedCliente, itens, condicao, total, observacoes)
+    const texto = formatarWhatsApp(selectedCliente, itens, condicao, total, observacoes, {
+      empresaNome,
+    })
     abrirWhatsApp(selectedCliente?.telefone || selectedCliente?.celular, texto)
   }
 
   const handlePdf = () => {
-    gerarPdfPedido(selectedCliente, itens, condicao, total, observacoes)
+    gerarPdfPedido(selectedCliente, itens, condicao, total, observacoes, { empresaNome })
   }
 
+  const abaixoMinimo = valorPedidoMinimo > 0 && total < valorPedidoMinimo
+  const excedeLimiteCredito =
+    !!selectedCliente &&
+    selectedCliente.limite_credito > 0 &&
+    selectedCliente.saldo_devedor + total > selectedCliente.limite_credito
+
   const handleSubmit = async () => {
+    setFormError(null)
     if (!selectedCliente) {
-      alert('Por favor, selecione um cliente para transmitir o pedido.')
+      setFormError('Selecione um cliente antes de transmitir o pedido.')
       onOpenClienteSelect()
       return
     }
-    await onSubmitOrder(observacoes, condicao)
+    if (selectedCliente.bloqueado) {
+      setFormError(
+        `Cliente bloqueado${selectedCliente.motivo_bloqueio ? `: ${selectedCliente.motivo_bloqueio}` : ''}. Salve como orçamento ou escolha outro cliente.`
+      )
+      return
+    }
+    if (abaixoMinimo) {
+      setFormError(`Valor mínimo do pedido é ${fmtBRL(valorPedidoMinimo)}.`)
+      return
+    }
+    await onSubmitOrder(
+      observacoes,
+      condicao,
+      formaPagamento,
+      formaPagamentoId || undefined,
+      prazoPagamentoId || undefined
+    )
   }
 
   const handleSalvarOrcamentoClick = async () => {
     if (!onSaveOrcamento) return
+    setFormError(null)
     setSavingOrcamento(true)
     try {
-      await onSaveOrcamento(observacoes, condicao)
+      await onSaveOrcamento(
+        observacoes,
+        condicao,
+        formaPagamento,
+        formaPagamentoId || undefined,
+        prazoPagamentoId || undefined
+      )
     } finally {
       setSavingOrcamento(false)
     }
@@ -148,26 +243,23 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity" onClick={onClose} />
 
-      {/* Drawer com 100dvh para mobile */}
-      <div className="relative z-10 flex h-[100dvh] w-full max-w-md flex-col bg-white shadow-2xl">
-        {/* Topo do Carrinho */}
-        <div className="flex items-center justify-between border-b border-slate-200 bg-[#0F3C46] px-4 py-3.5 text-white shrink-0">
+      <div className="relative z-10 flex h-[100dvh] w-full max-w-md flex-col bg-white dark:bg-slate-900 border-l border-slate-200/80 dark:border-slate-800 shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3.5 shrink-0">
           <div>
-            <h2 className="text-sm sm:text-base font-bold">Resumo do Pedido / Orçamento</h2>
-            <p className="text-[11px] text-teal-200">
+            <h2 className="font-display text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+              Resumo do Pedido / Orçamento
+            </h2>
+            <p className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
               {itens.length} produto(s) • {itens.reduce((a, b) => a + b.quantidade, 0)} un.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl bg-white/10 p-2 text-white hover:bg-white/20 transition-colors"
+            className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
             aria-label="Fechar"
           >
             <X className="h-5 w-5" />
@@ -175,86 +267,175 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         </div>
 
         {/* Corpo com Scroll */}
-        <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-4 bg-[#F8FAFC] dark:bg-[#090D16]">
+          {formError && (
+            <div
+              role="alert"
+              className="rounded-xl border border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-400 flex items-start gap-2"
+            >
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>{formError}</span>
+            </div>
+          )}
+
           {/* Seleção do Cliente */}
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+          <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 shadow-xs">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 Cliente do Pedido
               </span>
               <button
                 type="button"
                 onClick={onOpenClienteSelect}
-                className="text-xs font-bold text-teal-700 hover:text-teal-900 flex items-center gap-0.5"
+                className="text-xs font-semibold text-[#00A19C] hover:text-[#0F766E] flex items-center gap-0.5"
               >
                 {selectedCliente ? 'Trocar cliente' : 'Selecionar'} <ChevronRight className="h-3.5 w-3.5" />
               </button>
             </div>
 
             {selectedCliente ? (
-              <div className="rounded-xl bg-white p-2.5 border border-slate-200 shadow-2xs flex items-start gap-2.5">
-                <div className="rounded-lg bg-teal-50 p-2 text-teal-700 shrink-0">
-                  <UserCheck className="h-4 w-4" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-bold text-slate-900">{selectedCliente.razao_social}</p>
-                  <p className="text-[11px] text-slate-500 font-mono">CPF/CNPJ: {selectedCliente.cpf_cnpj}</p>
-                  {selectedCliente.cidade && (
-                    <p className="text-[10px] text-slate-400">
-                      {selectedCliente.cidade}/{selectedCliente.estado}
+              <div className="space-y-2">
+                <div className="rounded-xl bg-[#F8FAFC] dark:bg-slate-800/60 p-2.5 border border-slate-200/80 dark:border-slate-700 flex items-start gap-2.5">
+                  <div className="rounded-lg bg-[#00A19C]/10 p-2 text-[#00A19C] shrink-0">
+                    <UserCheck className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-semibold text-slate-900 dark:text-white">
+                      {selectedCliente.razao_social}
                     </p>
-                  )}
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+                      CPF/CNPJ: {selectedCliente.cpf_cnpj}
+                    </p>
+                    {selectedCliente.cidade && (
+                      <p className="text-[10px] text-slate-400">
+                        {selectedCliente.cidade}/{selectedCliente.estado}
+                      </p>
+                    )}
+                  </div>
                 </div>
+
+                {selectedCliente.bloqueado && (
+                  <div className="flex items-start gap-2 rounded-xl border border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-500/10 p-2.5 text-[11px] text-rose-700 dark:text-rose-400">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      Cliente bloqueado{selectedCliente.motivo_bloqueio ? `: ${selectedCliente.motivo_bloqueio}` : '.'}
+                    </span>
+                  </div>
+                )}
+
+                {excedeLimiteCredito && !selectedCliente.bloqueado && (
+                  <div className="flex items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-2.5 text-[11px] text-amber-800 dark:text-amber-300">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      Atenção: saldo + pedido ({fmtBRL(selectedCliente.saldo_devedor + total)}) excede o limite de crédito ({fmtBRL(selectedCliente.limite_credito)}).
+                    </span>
+                  </div>
+                )}
               </div>
             ) : (
               <button
                 type="button"
                 onClick={onOpenClienteSelect}
-                className="w-full rounded-xl border border-dashed border-teal-400 py-2.5 text-center text-xs font-bold text-teal-800 hover:bg-teal-50 transition-all bg-white"
+                className="w-full rounded-xl border border-dashed border-[#00A19C]/50 py-2.5 text-center text-xs font-semibold text-[#00A19C] hover:bg-[#00A19C]/5 transition-all"
               >
                 + Toque para escolher o cliente
               </button>
             )}
           </div>
 
-          {/* Condição de Pagamento */}
-          <div className="space-y-1">
-            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-              Condição de Pagamento
-            </label>
-            <select
-              value={condicao}
-              onChange={(e) => setCondicao(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-teal-500 focus:bg-white"
-            >
-              {CONDICOES_PAGAMENTO.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+          {/* Forma & Condição de Pagamento */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Forma de Pagamento
+              </label>
+              {formasPagamento.length > 0 ? (
+                <select
+                  value={formaPagamentoId}
+                  onChange={(e) => {
+                    const f = formasPagamento.find((x) => x.id === e.target.value)
+                    setFormaPagamentoId(e.target.value)
+                    if (f) setFormaPagamento(f.tipo || f.nome)
+                  }}
+                  className="w-full rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:border-[#00A19C]"
+                >
+                  {formasPagamento.map((fp) => (
+                    <option key={fp.id} value={fp.id}>
+                      {fp.nome}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <select
+                  value={formaPagamento}
+                  onChange={(e) => setFormaPagamento(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:border-[#00A19C]"
+                >
+                  {FORMAS_PAGAMENTO.map((fp) => (
+                    <option key={fp.id} value={fp.id}>
+                      {fp.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Condição / Prazo
+              </label>
+              {prazosPagamento.length > 0 ? (
+                <select
+                  value={prazoPagamentoId}
+                  onChange={(e) => {
+                    const p = prazosPagamento.find((x) => x.id === e.target.value)
+                    setPrazoPagamentoId(e.target.value)
+                    if (p) setCondicao(p.nome)
+                  }}
+                  className="w-full rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:border-[#00A19C]"
+                >
+                  {prazosPagamento.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nome}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <select
+                  value={condicao}
+                  onChange={(e) => handleCondicaoChange(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 outline-none focus:border-[#00A19C]"
+                >
+                  {CONDICOES_PAGAMENTO.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
           </div>
 
-          {/* Desconto Geral no Pedido: em Porcentagem (%) OU em Valor (R$) */}
+          {/* Desconto Geral */}
           {itens.length > 0 && (
-            <div className="rounded-2xl border border-teal-200 bg-teal-50/70 p-3 space-y-2.5">
+            <div className="rounded-xl border border-teal-200/80 dark:border-[#00A19C]/30 bg-teal-50/50 dark:bg-[#00A19C]/10 p-3 space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <span className="text-xs font-black text-teal-950 block">Desconto Geral</span>
-                  <span className="text-[10px] text-teal-700 font-medium">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white block">
+                    Desconto Geral
+                  </span>
+                  <span className="text-[10px] text-[#0F766E] dark:text-teal-300 font-medium font-mono tabular-nums">
                     Limite máx: <strong>{limiteDescontoPct}%</strong> ({fmtBRL(maxDescontoValor)})
                   </span>
                 </div>
 
-                {/* Alternador % vs R$ */}
-                <div className="inline-flex rounded-xl bg-teal-900/10 p-0.5 border border-teal-300/60">
+                <div className="inline-flex rounded-xl bg-white dark:bg-slate-900 p-0.5 border border-slate-200/80 dark:border-slate-700">
                   <button
                     type="button"
                     onClick={() => setModoDescontoGeral('pct')}
-                    className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-black transition-all ${
+                    className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all ${
                       modoDescontoGeral === 'pct'
-                        ? 'bg-teal-700 text-white shadow-2xs'
-                        : 'text-teal-800 hover:text-teal-950'
+                        ? 'bg-[#00A19C] text-white shadow-2xs'
+                        : 'text-slate-600 dark:text-slate-300'
                     }`}
                   >
                     <Percent className="h-3 w-3" />
@@ -263,10 +444,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   <button
                     type="button"
                     onClick={() => setModoDescontoGeral('valor')}
-                    className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-black transition-all ${
+                    className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all ${
                       modoDescontoGeral === 'valor'
-                        ? 'bg-teal-700 text-white shadow-2xs'
-                        : 'text-teal-800 hover:text-teal-950'
+                        ? 'bg-[#00A19C] text-white shadow-2xs'
+                        : 'text-slate-600 dark:text-slate-300'
                     }`}
                   >
                     <DollarSign className="h-3 w-3" />
@@ -275,7 +456,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 </div>
               </div>
 
-              {/* Campo de Entrada conforme Modo (% ou R$) */}
               {modoDescontoGeral === 'pct' ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
@@ -293,19 +473,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           handleApplyDescontoPct(isNaN(val) ? 0 : val)
                         }}
                         placeholder="Ex: 5 ou 10"
-                        className="w-full rounded-xl border border-teal-300 bg-white py-1.5 pl-3 pr-8 text-xs font-black text-teal-950 focus:outline-teal-600"
+                        className="w-full rounded-xl border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-900 py-1.5 pl-3 pr-8 font-mono tabular-nums text-xs font-bold text-slate-900 dark:text-white focus:outline-[#00A19C]"
                       />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-teal-700">
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-[#00A19C]">
                         %
                       </span>
                     </div>
                     <div className="text-right shrink-0 min-w-[90px]">
-                      <div className="text-[10px] text-teal-700">Desconto em R$</div>
-                      <div className="text-xs font-black text-teal-900">- {fmtBRL(totalDesconto)}</div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400">Desconto R$</div>
+                      <div className="font-mono tabular-nums text-xs font-bold text-[#00A19C]">
+                        - {fmtBRL(totalDesconto)}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Atalhos em % */}
                   <div className="flex items-center gap-1 flex-wrap">
                     {[0, 5, 10, 15, 20, limiteDescontoPct]
                       .filter((v, idx, arr) => v <= limiteDescontoPct && arr.indexOf(v) === idx)
@@ -314,10 +495,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           key={pct}
                           type="button"
                           onClick={() => handleApplyDescontoPct(pct)}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                          className={`px-2 py-1 rounded-lg font-mono tabular-nums text-[10px] font-semibold transition-all ${
                             Math.abs(pctEfetivoGeral - pct) < 0.1 && (pct > 0 || totalDesconto === 0)
-                              ? 'bg-teal-700 text-white shadow-2xs'
-                              : 'bg-white text-teal-800 border border-teal-300/80 hover:bg-teal-100'
+                              ? 'bg-[#00A19C] text-white shadow-2xs'
+                              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700'
                           }`}
                         >
                           {pct === 0 ? '0%' : pct === limiteDescontoPct ? `Máx ${pct}%` : `${pct}%`}
@@ -329,7 +510,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="relative flex-1">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-teal-700">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-[#00A19C]">
                         R$
                       </span>
                       <input
@@ -345,24 +526,25 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           handleApplyDescontoValor(isNaN(val) ? 0 : val)
                         }}
                         placeholder="Ex: 20,00"
-                        className="w-full rounded-xl border border-teal-300 bg-white py-1.5 pl-9 pr-3 text-xs font-black text-teal-950 focus:outline-teal-600"
+                        className="w-full rounded-xl border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-900 py-1.5 pl-9 pr-3 font-mono tabular-nums text-xs font-bold text-slate-900 dark:text-white focus:outline-[#00A19C]"
                       />
                     </div>
                     <div className="text-right shrink-0 min-w-[90px]">
-                      <div className="text-[10px] text-teal-700">Equivalente a</div>
-                      <div className="text-xs font-black text-teal-900">{pctEfetivoGeral.toFixed(1)}%</div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400">Equivalente a</div>
+                      <div className="font-mono tabular-nums text-xs font-bold text-[#00A19C]">
+                        {pctEfetivoGeral.toFixed(1)}%
+                      </div>
                     </div>
                   </div>
 
-                  {/* Atalhos em R$ */}
                   <div className="flex items-center gap-1 flex-wrap">
                     <button
                       type="button"
                       onClick={() => handleApplyDescontoValor(0)}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                      className={`px-2 py-1 rounded-lg font-mono tabular-nums text-[10px] font-semibold transition-all ${
                         totalDesconto === 0
-                          ? 'bg-teal-700 text-white'
-                          : 'bg-white text-teal-800 border border-teal-300/80'
+                          ? 'bg-[#00A19C] text-white'
+                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700'
                       }`}
                     >
                       R$ 0
@@ -372,10 +554,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         key={val}
                         type="button"
                         onClick={() => handleApplyDescontoValor(val)}
-                        className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                        className={`px-2 py-1 rounded-lg font-mono tabular-nums text-[10px] font-semibold transition-all ${
                           Math.abs(totalDesconto - val) < 0.5
-                            ? 'bg-teal-700 text-white'
-                            : 'bg-white text-teal-800 border border-teal-300/80 hover:bg-teal-100'
+                            ? 'bg-[#00A19C] text-white'
+                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700'
                         }`}
                       >
                         R$ {val}
@@ -385,7 +567,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       <button
                         type="button"
                         onClick={() => handleApplyDescontoValor(maxDescontoValor)}
-                        className="px-2 py-1 rounded-lg text-[10px] font-bold bg-white text-teal-800 border border-teal-300/80 hover:bg-teal-100"
+                        className="px-2 py-1 rounded-lg font-mono tabular-nums text-[10px] font-semibold bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700"
                       >
                         Máx ({fmtBRL(maxDescontoValor)})
                       </button>
@@ -399,27 +581,49 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           {/* Lista de Itens */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 Itens do Pedido ({itens.length})
               </span>
               {itens.length > 0 && (
-                <button
-                  type="button"
-                  onClick={onClearCart}
-                  className="text-xs font-semibold text-rose-600 hover:text-rose-800"
-                >
-                  Limpar tudo
-                </button>
+                confirmClear ? (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClearCart()
+                        setConfirmClear(false)
+                      }}
+                      className="rounded-lg bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white"
+                    >
+                      Confirmar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClear(false)}
+                      className="rounded-lg bg-slate-200 dark:bg-slate-700 px-2 py-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-200"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClear(true)}
+                    className="text-xs font-semibold text-rose-600 dark:text-rose-400 hover:underline"
+                  >
+                    Limpar tudo
+                  </button>
+                )
               )}
             </div>
 
             {itens.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-slate-400">
-                <p className="text-xs font-bold text-slate-600">Seu pedido está vazio</p>
+              <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center text-slate-400">
+                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Seu pedido está vazio</p>
                 <p className="text-[11px] mt-0.5">Adicione produtos pelo catálogo para iniciar.</p>
               </div>
             ) : (
-              <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
+              <div className="divide-y divide-slate-100 dark:divide-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
                 {itens.map((it) => {
                   const subBruto = it.quantidade * it.precoUnitarioCobrado
                   const descReaisItem = subBruto * ((it.descontoPct || 0) / 100)
@@ -429,13 +633,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
                   return (
                     <div key={it.produtoId} className="p-3 space-y-2">
-                      {/* Linha 1: Nome + Botão Remover */}
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <p className="text-xs font-bold text-slate-900 leading-snug">{it.nome}</p>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
-                            <span className="font-mono font-semibold">#{it.codigo}</span> •{' '}
-                            {fmtBRL(it.precoUnitarioCobrado)}/{it.unidade}
+                          <p className="text-xs font-semibold text-slate-900 dark:text-white leading-snug">
+                            {it.nome}
+                          </p>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono tabular-nums">
+                            #{it.codigo} • {fmtBRL(it.precoUnitarioCobrado)}/{it.unidade}
                           </p>
                         </div>
                         <button
@@ -448,9 +652,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         </button>
                       </div>
 
-                      {/* Linha 2: Desconto (% ou R$) + Stepper Qtd + Subtotal */}
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-50">
-                        {/* Desconto individual em % ou R$ */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-slate-100 dark:border-slate-800">
                         <div className="flex items-center gap-1 text-[11px]">
                           <button
                             type="button"
@@ -460,7 +662,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                                 [it.produtoId]: modoItem === 'pct' ? 'valor' : 'pct',
                               }))
                             }
-                            className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-teal-800 border border-slate-200 hover:bg-teal-50"
+                            className="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-[#00A19C] border border-slate-200/80 dark:border-slate-700"
                             title="Alternar entre desconto em % ou R$"
                           >
                             Desc ({modoItem === 'pct' ? '%' : 'R$'}):
@@ -480,7 +682,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                                 if (onUpdateDesconto) onUpdateDesconto(it.produtoId, capped)
                               }}
                               placeholder="0%"
-                              className="w-14 px-1.5 py-1 rounded-lg border border-slate-200 text-center text-xs font-bold font-mono focus:outline-teal-500"
+                              className="w-14 px-1.5 py-1 rounded-lg border border-slate-200/80 dark:border-slate-700 bg-[#F8FAFC] dark:bg-slate-800 text-center text-xs font-bold font-mono tabular-nums text-slate-900 dark:text-white focus:outline-[#00A19C]"
                             />
                           ) : (
                             <input
@@ -497,40 +699,40 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                                 if (onUpdateDesconto) onUpdateDesconto(it.produtoId, pct)
                               }}
                               placeholder="R$ 0"
-                              className="w-16 px-1.5 py-1 rounded-lg border border-slate-200 text-center text-xs font-bold font-mono focus:outline-teal-500"
+                              className="w-16 px-1.5 py-1 rounded-lg border border-slate-200/80 dark:border-slate-700 bg-[#F8FAFC] dark:bg-slate-800 text-center text-xs font-bold font-mono tabular-nums text-slate-900 dark:text-white focus:outline-[#00A19C]"
                             />
                           )}
                         </div>
 
-                        {/* Quantidade Stepper */}
-                        <div className="flex items-center rounded-xl bg-slate-100 p-0.5 ring-1 ring-slate-200">
+                        <div className="flex items-center rounded-xl bg-[#F8FAFC] dark:bg-slate-800 p-0.5 border border-slate-200/80 dark:border-slate-700">
                           <button
                             type="button"
                             onClick={() => onUpdateQty(it.produtoId, Math.max(1, it.quantidade - 1))}
-                            className="p-1.5 text-slate-700 active:bg-slate-200 rounded-lg"
+                            className="p-1.5 text-slate-600 dark:text-slate-300 active:bg-slate-200 dark:active:bg-slate-700 rounded-lg"
                             aria-label="Diminuir"
                           >
                             <Minus className="h-3.5 w-3.5" />
                           </button>
-                          <span className="w-8 text-center text-xs font-black text-slate-900">
+                          <span className="w-8 text-center font-mono tabular-nums text-xs font-bold text-slate-900 dark:text-white">
                             {it.quantidade}
                           </span>
                           <button
                             type="button"
                             onClick={() => onUpdateQty(it.produtoId, it.quantidade + 1)}
-                            className="p-1.5 text-slate-700 active:bg-slate-200 rounded-lg"
+                            className="p-1.5 text-slate-600 dark:text-slate-300 active:bg-slate-200 dark:active:bg-slate-700 rounded-lg"
                             aria-label="Aumentar"
                           >
                             <Plus className="h-3.5 w-3.5" />
                           </button>
                         </div>
 
-                        {/* Valor Total do Item */}
-                        <div className="text-right min-w-[76px]">
-                          <p className="text-xs font-black text-teal-800">{fmtBRL(totalLiquidoItem)}</p>
+                        <div className="text-right min-w-[78px]">
+                          <p className="font-mono tabular-nums text-xs font-bold text-[#00A19C]">
+                            {fmtBRL(totalLiquidoItem)}
+                          </p>
                           {it.descontoPct > 0 && (
-                            <p className="text-[10px] text-emerald-600 font-bold">
-                              -{it.descontoPct.toFixed(1)}% (-{fmtBRL(descReaisItem)})
+                            <p className="font-mono tabular-nums text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                              -{it.descontoPct.toFixed(1)}%
                             </p>
                           )}
                         </div>
@@ -544,7 +746,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
           {/* Observações */}
           <div className="space-y-1">
-            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
               Observações (Entrega, Prazo, OC)
             </label>
             <textarea
@@ -552,41 +754,49 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               onChange={(e) => setObservacoes(e.target.value)}
               placeholder="Ex: Entregar no período da manhã, falar com responsável..."
               rows={2}
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-800 outline-none focus:border-teal-500 focus:bg-white resize-none"
+              className="w-full rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-[#00A19C] resize-none"
             />
           </div>
         </div>
 
-        {/* Rodapé Fixo do Carrinho com Totais e Ações */}
-        <div className="border-t border-slate-200 bg-slate-50 p-3.5 sm:p-4 space-y-2.5 shrink-0 pb-[max(0.875rem,env(safe-area-inset-bottom))]">
+        {/* Rodapé Fixo */}
+        <div className="border-t border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 sm:p-4 space-y-2.5 shrink-0 pb-[max(0.875rem,env(safe-area-inset-bottom))]">
+          {abaixoMinimo && itens.length > 0 && (
+            <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-3 py-1.5 text-[11px] font-semibold text-amber-800 dark:text-amber-300 font-mono tabular-nums">
+              Pedido mínimo da empresa: {fmtBRL(valorPedidoMinimo)} (faltam {fmtBRL(valorPedidoMinimo - total)})
+            </div>
+          )}
+
           <div className="space-y-1 text-xs">
-            <div className="flex items-center justify-between text-slate-500">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
               <span>Subtotal Bruto</span>
-              <span>{fmtBRL(subtotal)}</span>
+              <span className="font-mono tabular-nums">{fmtBRL(subtotal)}</span>
             </div>
             {totalDesconto > 0 && (
-              <div className="flex items-center justify-between text-emerald-700 font-bold">
+              <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 font-semibold">
                 <span>Desconto Total ({pctEfetivoGeral.toFixed(1)}%)</span>
-                <span>- {fmtBRL(totalDesconto)}</span>
+                <span className="font-mono tabular-nums">- {fmtBRL(totalDesconto)}</span>
               </div>
             )}
-            <div className="flex items-center justify-between pt-1 border-t border-slate-200">
-              <span className="font-bold uppercase tracking-wider text-slate-700">Total Líquido</span>
-              <span className="text-lg sm:text-xl font-black text-[#0F3C46]">{fmtBRL(total)}</span>
+            <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/80 dark:border-slate-800">
+              <span className="font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Total Líquido
+              </span>
+              <span className="font-display font-mono tabular-nums text-lg sm:text-xl font-bold text-slate-900 dark:text-white">
+                {fmtBRL(total)}
+              </span>
             </div>
           </div>
 
-          {/* Botão Primário: Transmitir Pedido + Botão Salvar Orçamento */}
           <div className="grid grid-cols-5 gap-2">
             {onSaveOrcamento && (
               <button
                 type="button"
                 onClick={handleSalvarOrcamentoClick}
                 disabled={itens.length === 0 || savingOrcamento || isSubmitting}
-                className="col-span-2 flex h-11 items-center justify-center gap-1.5 rounded-xl border-2 border-amber-500 bg-amber-50 font-bold text-xs text-amber-900 shadow-2xs active:scale-[0.98] transition-all hover:bg-amber-100 disabled:opacity-50"
-                title="Salvar como Orçamento para continuar ou converter depois"
+                className="col-span-2 flex h-11 items-center justify-center gap-1.5 rounded-xl border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 font-semibold text-xs text-amber-800 dark:text-amber-300 active:scale-[0.98] transition-all hover:bg-amber-100 dark:hover:bg-amber-500/20 disabled:opacity-50"
               >
-                <BookmarkPlus className="h-4 w-4 text-amber-600 shrink-0" />
+                <BookmarkPlus className="h-4 w-4 shrink-0" />
                 <span>{savingOrcamento ? 'Salvando...' : 'Salvar Orç.'}</span>
               </button>
             )}
@@ -597,20 +807,19 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               disabled={itens.length === 0 || isSubmitting}
               className={`${
                 onSaveOrcamento ? 'col-span-3' : 'col-span-5'
-              } flex h-11 items-center justify-center gap-1.5 rounded-xl bg-teal-800 font-bold text-xs uppercase tracking-wider text-white shadow-md active:scale-[0.98] transition-all hover:bg-teal-700 disabled:opacity-50`}
+              } flex h-11 items-center justify-center gap-1.5 rounded-xl bg-[#00A19C] font-semibold text-xs uppercase tracking-wider text-white shadow-sm active:scale-[0.98] transition-all hover:bg-[#008C87] disabled:opacity-50`}
             >
               <Send className="h-4 w-4 shrink-0" />
               <span>{isSubmitting ? 'Transmitindo...' : 'Transmitir Pedido'}</span>
             </button>
           </div>
 
-          {/* Ações Secundárias: WhatsApp & PDF */}
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
               onClick={handleWhatsApp}
               disabled={itens.length === 0}
-              className="flex h-9 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 font-bold text-xs text-white shadow-2xs active:scale-[0.98] transition-all hover:bg-emerald-500 disabled:opacity-50"
+              className="flex h-9 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 font-semibold text-xs text-white active:scale-[0.98] transition-all hover:bg-emerald-500 disabled:opacity-50"
             >
               <MessageCircle className="h-3.5 w-3.5" />
               <span>Enviar WhatsApp</span>
@@ -619,9 +828,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               type="button"
               onClick={handlePdf}
               disabled={itens.length === 0}
-              className="flex h-9 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white font-bold text-xs text-slate-700 shadow-2xs active:scale-[0.98] transition-all hover:bg-slate-50 disabled:opacity-50"
+              className="flex h-9 items-center justify-center gap-1.5 rounded-xl border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold text-xs text-slate-700 dark:text-slate-200 active:scale-[0.98] transition-all hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"
             >
-              <FileText className="h-3.5 w-3.5" />
+              <FileText className="h-3.5 w-3.5 text-[#00A19C]" />
               <span>Gerar PDF</span>
             </button>
           </div>

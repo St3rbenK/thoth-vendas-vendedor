@@ -33,24 +33,24 @@ const PRODUCTS: Record<ProductId, ProductConfig> = {
     id: 'thoth-vendas',
     prefix: 'thoth',
     suffix: 'vendas',
-    primary: '#10B981',
-    secondary: '#047857',
-    sublabel: 'Gestão B2B & Catálogo',
+    primary: '#00A19C',
+    secondary: '#0F766E',
+    sublabel: 'Força de Vendas B2B',
   },
   erp: {
     id: 'thoth-erp',
     prefix: 'thoth',
     suffix: 'erp',
-    primary: '#0284C7',
-    secondary: '#0369A1',
+    primary: '#0040E5',
+    secondary: '#0B2545',
     sublabel: 'Gestão Financeira & Fiscal',
   },
   pontua: {
     id: 'thoth-pontua',
     prefix: 'thoth',
     suffix: 'pontua',
-    primary: '#7C3AED',
-    secondary: '#5B21B6',
+    primary: '#4A3AFF',
+    secondary: '#3730A3',
     sublabel: 'Fidelidade & Cashback',
   },
   whats: {
@@ -73,8 +73,8 @@ const PRODUCTS: Record<ProductId, ProductConfig> = {
     id: 'thoth-vet',
     prefix: 'thoth',
     suffix: 'vet',
-    primary: '#22C55E',
-    secondary: '#15803D',
+    primary: '#D97706',
+    secondary: '#B45309',
     sublabel: 'Saúde Animal',
   },
   pdv: {
@@ -126,8 +126,8 @@ export const AppLogo: React.FC<AppLogoProps> = ({
       ? 'text-2xl leading-none'
       : 'text-xl leading-none'
 
-  const prefixColorClass = variant === 'dark' ? 'text-white' : 'text-slate-900'
-  const sublabelColorClass = variant === 'dark' ? 'text-slate-300' : 'text-slate-500'
+  const prefixColorClass = variant === 'dark' ? 'text-white' : 'text-slate-900 dark:text-white'
+  const sublabelColorClass = variant === 'dark' ? 'text-slate-300' : 'text-slate-500 dark:text-slate-400'
 
   return (
     <div className={`inline-flex items-center gap-2.5 select-none ${className}`}>

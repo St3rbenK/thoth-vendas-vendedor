@@ -1,40 +1,80 @@
 import { jsPDF } from 'jspdf'
-import type { Cliente, ItemCarrinho } from '../types'
+import type { Cliente, ItemCarrinho, Pedido } from '../types'
+
+const fmtBRL = (val: number) =>
+  Number(val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 export function formatarWhatsApp(
   cliente: Cliente | null,
   itens: ItemCarrinho[],
   condicao: string,
   total: number,
-  observacoes?: string
+  observacoes?: string,
+  opts?: { numero?: string; empresaNome?: string; isOrcamento?: boolean }
 ): string {
   const dataHoje = new Date().toLocaleDateString('pt-BR')
-  let texto = `🛒 *PEDIDO DE VENDA • THOTH VENDAS*\n`
-  texto += `📅 *Data:* ${dataHoje}\n`
+  const titulo = opts?.isOrcamento ? 'ORÇAMENTO COMERCIAL' : 'PEDIDO DE VENDA'
+  const headerBrand = opts?.empresaNome ? `${opts.empresaNome} • ThothVendas` : 'ThothVendas'
+
+  let texto = `*${titulo}${opts?.numero ? ` #${opts.numero}` : ''}*\n`
+  texto += `${headerBrand}\n`
+  texto += `Data: ${dataHoje}\n`
   if (cliente) {
-    texto += `👤 *Cliente:* ${cliente.razao_social}\n`
-    texto += `📄 *CNPJ/CPF:* ${cliente.cpf_cnpj}\n`
+    texto += `Cliente: *${cliente.razao_social}*\n`
+    if (cliente.cpf_cnpj) {
+      texto += `CNPJ/CPF: ${cliente.cpf_cnpj}\n`
+    }
     if (cliente.cidade) {
-      texto += `📍 *Cidade:* ${cliente.cidade} - ${cliente.estado || 'SP'}\n`
+      texto += `Cidade: ${cliente.cidade}${cliente.estado ? ` - ${cliente.estado}` : ''}\n`
     }
   }
-  texto += `💳 *Condição:* ${condicao || 'À Vista'}\n`
-  texto += `\n*ITENS DO PEDIDO:*\n`
+  texto += `Condicao: ${condicao || 'A Vista'}\n`
+  texto += `\n*ITENS:*\n`
 
   itens.forEach((it, idx) => {
-    const unitFmt = it.precoUnitarioCobrado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-    const subFmt = it.subtotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-    texto += `${idx + 1}. *[#${it.codigo}]* ${it.nome}\n`
-    texto += `   ${it.quantidade} ${it.unidade} x ${unitFmt} = *${subFmt}*\n`
+    const unitFmt = fmtBRL(it.precoUnitarioCobrado)
+    const subFmt = fmtBRL(it.subtotal)
+    texto += `${idx + 1}. *[#${it.codigo || '-'}]* ${it.nome}\n`
+    texto += `   ${it.quantidade} ${it.unidade || 'UN'} x ${unitFmt}`
+    if (it.descontoPct > 0) {
+      texto += ` (-${it.descontoPct.toFixed(1)}%)`
+    }
+    texto += ` = *${subFmt}*\n`
   })
 
-  const totalFmt = total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-  texto += `\n💰 *VALOR TOTAL: ${totalFmt}*\n`
+  texto += `\n*VALOR TOTAL: ${fmtBRL(total)}*\n`
 
   if (observacoes && observacoes.trim()) {
-    texto += `📝 *Obs:* ${observacoes.trim()}\n`
+    texto += `Obs: ${observacoes.trim()}\n`
   }
 
+  return texto
+}
+
+export function formatarWhatsAppPedidoServidor(pedido: Pedido, empresaNome: string): string {
+  const dataFmt = new Date(pedido.created_at).toLocaleDateString('pt-BR')
+  const tipo = pedido.status === 'orcamento' ? 'ORÇAMENTO COMERCIAL' : 'PEDIDO DE VENDA'
+  let texto = `*${tipo} #${pedido.numero || pedido.id.slice(0, 8)}*\n`
+  texto += `${empresaNome} • ThothVendas\n`
+  texto += `Data: ${dataFmt}\n`
+  texto += `Cliente: *${pedido.cliente_nome || 'Cliente'}*\n`
+  if (pedido.condicao_pagamento) {
+    texto += `Condicao: ${pedido.condicao_pagamento}\n`
+  }
+  texto += `Status: ${String(pedido.status || 'REGISTRADO').toUpperCase()}\n`
+
+  if (pedido.itens && pedido.itens.length > 0) {
+    texto += `\n*ITENS:*\n`
+    pedido.itens.forEach((it, idx) => {
+      texto += `${idx + 1}. *[#${it.codigo_produto || '-'}]* ${it.nome_produto}\n`
+      texto += `   ${it.quantidade} ${it.unidade || 'UN'} x ${fmtBRL(it.preco_unitario_cobrado)} = *${fmtBRL(it.valor_total)}*\n`
+    })
+  }
+
+  texto += `\n*VALOR TOTAL: ${fmtBRL(pedido.valor_total)}*\n`
+  if (pedido.observacao && pedido.observacao.trim()) {
+    texto += `Obs: ${pedido.observacao.trim()}\n`
+  }
   return texto
 }
 
@@ -54,26 +94,30 @@ export function gerarPdfPedido(
   itens: ItemCarrinho[],
   condicao: string,
   total: number,
-  observacoes?: string
+  observacoes?: string,
+  opts?: { numero?: string; empresaNome?: string; isOrcamento?: boolean; dataEmissao?: string }
 ) {
   const doc = new jsPDF()
-  const dataHoje = new Date().toLocaleDateString('pt-BR')
+  const dataHoje = opts?.dataEmissao || new Date().toLocaleDateString('pt-BR')
+  const titulo = opts?.isOrcamento ? 'ORÇAMENTO COMERCIAL' : 'PEDIDO DE VENDA'
+  const headerSub = opts?.empresaNome ? `${opts.empresaNome} • ThothVendas` : 'ThothVendas • Força de Vendas B2B'
 
-  // Cabeçalho
-  doc.setFillColor(21, 95, 110) // Brand Teal #155F6E
+  // Cabeçalho Oficial Teal Comercial #00A19C
+  doc.setFillColor(0, 161, 156)
   doc.rect(0, 0, 210, 28, 'F')
   doc.setTextColor(255, 255, 255)
-  doc.setFontSize(16)
+  doc.setFontSize(15)
   doc.setFont('helvetica', 'bold')
-  doc.text('THOTH VENDAS • PEDIDO DE VENDA', 14, 18)
+  doc.text(`${titulo}${opts?.numero ? ` #${opts.numero}` : ''}`, 14, 14)
 
   doc.setFontSize(9)
   doc.setFont('helvetica', 'normal')
-  doc.text(`Data: ${dataHoje}`, 160, 18)
+  doc.text(headerSub, 14, 22)
+  doc.text(`Emissão: ${dataHoje}`, 160, 14)
 
   // Dados do Cliente
   let y = 38
-  doc.setTextColor(30, 41, 59)
+  doc.setTextColor(15, 23, 42)
   doc.setFontSize(10)
   doc.setFont('helvetica', 'bold')
   doc.text('DADOS DO CLIENTE & COBRANÇA', 14, y)
@@ -85,12 +129,12 @@ export function gerarPdfPedido(
   doc.text(`CNPJ/CPF: ${cliente?.cpf_cnpj || '-'}`, 130, y)
 
   y += 5
-  doc.text(`Cidade/UF: ${cliente?.cidade ? `${cliente.cidade}/${cliente.estado}` : '-'}`, 14, y)
-  doc.text(`Condição de Pagamento: ${condicao || 'À Vista'}`, 130, y)
+  doc.text(`Cidade/UF: ${cliente?.cidade ? `${cliente.cidade}/${cliente.estado || ''}` : '-'}`, 14, y)
+  doc.text(`Condição: ${condicao || 'À Vista'}`, 130, y)
 
   // Linha divisória
   y += 8
-  doc.setDrawColor(203, 213, 225)
+  doc.setDrawColor(226, 232, 240)
   doc.line(14, y, 196, y)
 
   // Tabela de Itens (Header)
@@ -102,9 +146,9 @@ export function gerarPdfPedido(
   doc.setTextColor(71, 85, 105)
 
   doc.text('CÓD', 16, y)
-  doc.text('DESCRIÇÃO DO PRODUTO', 32, y)
+  doc.text('DESCRIÇÃO DO PRODUTO', 34, y)
   doc.text('QTD', 120, y)
-  doc.text('UN', 135, y)
+  doc.text('UN', 136, y)
   doc.text('UNIT (R$)', 150, y)
   doc.text('TOTAL (R$)', 175, y)
 
@@ -113,49 +157,63 @@ export function gerarPdfPedido(
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(15, 23, 42)
 
-  itens.forEach((it) => {
-    if (y > 270) {
-      doc.addPage()
-      y = 20
-    }
-    const unitStr = it.precoUnitarioCobrado.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    const subStr = it.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-    doc.text(it.codigo, 16, y)
-    doc.text(it.nome.slice(0, 48), 32, y)
-    doc.text(String(it.quantidade), 120, y)
-    doc.text(it.unidade, 135, y)
-    doc.text(unitStr, 150, y)
-    doc.text(subStr, 175, y)
-
+  if (itens.length === 0) {
+    doc.setFont('helvetica', 'italic')
+    doc.setTextColor(100, 116, 139)
+    doc.text('Itens consolidados no pedido.', 16, y)
     y += 6
-  })
+  } else {
+    itens.forEach((it) => {
+      if (y > 270) {
+        doc.addPage()
+        y = 20
+      }
+      const unitStr = it.precoUnitarioCobrado.toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+      const subStr = it.subtotal.toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+
+      doc.text((it.codigo || '-').slice(0, 10), 16, y)
+      doc.text(it.nome.slice(0, 44), 34, y)
+      doc.text(String(it.quantidade), 120, y)
+      doc.text(it.unidade || 'UN', 136, y)
+      doc.text(unitStr, 150, y)
+      doc.text(subStr, 175, y)
+
+      y += 6
+    })
+  }
 
   // Total
   y += 4
-  doc.setDrawColor(203, 213, 225)
+  doc.setDrawColor(226, 232, 240)
   doc.line(14, y, 196, y)
 
   y += 8
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(12)
-  doc.setTextColor(21, 95, 110)
-  const totalFmt = total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-  doc.text(`VALOR TOTAL: ${totalFmt}`, 130, y)
+  doc.setTextColor(0, 161, 156)
+  doc.text(`VALOR TOTAL: ${fmtBRL(total)}`, 130, y)
 
   if (observacoes && observacoes.trim()) {
     y += 10
     doc.setFontSize(8)
     doc.setFont('helvetica', 'italic')
     doc.setTextColor(100, 116, 139)
-    doc.text(`Observações: ${observacoes.trim()}`, 14, y)
+    doc.text(`Observações: ${observacoes.trim().slice(0, 120)}`, 14, y)
   }
 
   // Rodapé
   doc.setFontSize(8)
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(148, 163, 184)
-  doc.text('Thoth Vendas • Emitido diretamente pelo aplicativo de força de vendas', 14, 285)
+  doc.text('ThothVendas • Documento emitido pelo App do Vendedor', 14, 285)
 
-  doc.save(`pedido-${new Date().toISOString().slice(0, 10)}.pdf`)
+  const filePrefix = opts?.isOrcamento ? 'orcamento' : 'pedido'
+  const fileSuffix = opts?.numero || new Date().toISOString().slice(0, 10)
+  doc.save(`${filePrefix}-${fileSuffix}.pdf`)
 }

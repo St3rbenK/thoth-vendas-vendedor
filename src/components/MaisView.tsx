@@ -22,15 +22,21 @@ import {
   Sparkles,
   BadgeCheck,
   X,
+  AlertCircle,
+  Sun,
+  Moon,
+  Tag,
 } from 'lucide-react'
 import { criarCliente, updateVendedorPerfil } from '../services/api'
 import { AppLogo } from './AppLogo'
-import type { Cliente, UsuarioVendedor, EmpresaVinculo, NovoClientePayload } from '../types'
+import type { Cliente, UsuarioVendedor, EmpresaVinculo, NovoClientePayload, TabelaPreco } from '../types'
+import type { ThemeMode } from '../hooks/useTheme'
 
 interface MaisViewProps {
   currentUser: UsuarioVendedor | null
   onUpdateUser: (u: UsuarioVendedor) => void
   clientes: Cliente[]
+  tabelas?: TabelaPreco[]
   onClienteCreated: (c: Cliente) => void
   onSelectClienteForOrder?: (c: Cliente) => void
   empresaAtiva: EmpresaVinculo | null
@@ -40,14 +46,39 @@ interface MaisViewProps {
   onReloadData?: () => Promise<void> | void
   autoOpenNewClient?: boolean
   onClearAutoOpenNewClient?: () => void
+  theme: ThemeMode
+  onToggleTheme: () => void
 }
 
 type SettingsScreen = 'menu' | 'clientes' | 'novo_cliente' | 'perfil' | 'alcada'
+
+function formatCpfCnpjInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 14)
+  if (digits.length <= 11) {
+    if (digits.length <= 3) return digits
+    if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`
+    if (digits.length <= 9) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`
+    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9, 11)}`
+  }
+  if (digits.length <= 12) {
+    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`
+  }
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12, 14)}`
+}
+
+function formatPhoneInput(raw: string): string {
+  const d = raw.replace(/\D/g, '').slice(0, 11)
+  if (d.length <= 2) return d
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7, 11)}`
+}
 
 export function MaisView({
   currentUser,
   onUpdateUser,
   clientes,
+  tabelas = [],
   onClienteCreated,
   onSelectClienteForOrder,
   empresaAtiva,
@@ -57,16 +88,20 @@ export function MaisView({
   onReloadData,
   autoOpenNewClient = false,
   onClearAutoOpenNewClient,
+  theme,
+  onToggleTheme,
 }: MaisViewProps) {
   const [screen, setScreen] = useState<SettingsScreen>(autoOpenNewClient ? 'novo_cliente' : 'menu')
   const [clienteSearch, setClienteSearch] = useState('')
   const [salvandoCliente, setSalvandoCliente] = useState(false)
   const [buscandoCep, setBuscandoCep] = useState(false)
   const [sincronizando, setSincronizando] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
 
   useEffect(() => {
     if (autoOpenNewClient) {
       setScreen('novo_cliente')
+      setFormError(null)
       if (onClearAutoOpenNewClient) onClearAutoOpenNewClient()
     }
   }, [autoOpenNewClient, onClearAutoOpenNewClient])
@@ -87,6 +122,7 @@ export function MaisView({
     bairro: '',
     cidade: '',
     estado: '',
+    tabela_preco_id: '',
     observacoes: '',
   })
 
@@ -156,14 +192,24 @@ export function MaisView({
 
   const handleSalvarNovoCliente = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!clienteForm.razao_social.trim() || !clienteForm.cpf_cnpj.trim()) {
-      alert('Razão Social / Nome e CPF/CNPJ são obrigatórios.')
+    setFormError(null)
+    const docDigits = clienteForm.cpf_cnpj.replace(/\D/g, '')
+    if (!clienteForm.razao_social.trim() || !docDigits) {
+      setFormError('Razão Social / Nome e CPF/CNPJ são obrigatórios.')
+      return
+    }
+    if (docDigits.length !== 11 && docDigits.length !== 14) {
+      setFormError('Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido.')
       return
     }
 
     setSalvandoCliente(true)
     try {
-      const salvo = await criarCliente(clienteForm)
+      const payload: NovoClientePayload = {
+        ...clienteForm,
+        tabela_preco_id: clienteForm.tabela_preco_id || undefined,
+      }
+      const salvo = await criarCliente(payload)
       onClienteCreated(salvo)
       setClienteForm({
         razao_social: '',
@@ -181,12 +227,13 @@ export function MaisView({
         bairro: '',
         cidade: '',
         estado: '',
+        tabela_preco_id: '',
         observacoes: '',
       })
       setScreen('clientes')
       triggerToast('Cliente cadastrado e sincronizado com o ERP!')
     } catch (err: any) {
-      alert(`Falha ao cadastrar cliente: ${err.message || err}`)
+      setFormError(err.message || 'Falha ao cadastrar cliente.')
     } finally {
       setSalvandoCliente(false)
     }
@@ -194,12 +241,13 @@ export function MaisView({
 
   const handleSalvarPerfil = async (e: React.FormEvent) => {
     e.preventDefault()
+    setFormError(null)
     if (novoPin && novoPin !== confirmaPin) {
-      alert('O PIN e a confirmação não coincidem.')
+      setFormError('O PIN e a confirmação não coincidem.')
       return
     }
     if (novoPin && (novoPin.length < 4 || novoPin.length > 6)) {
-      alert('O PIN precisa ter entre 4 e 6 dígitos numéricos.')
+      setFormError('O PIN precisa ter entre 4 e 6 dígitos numéricos.')
       return
     }
 
@@ -220,7 +268,7 @@ export function MaisView({
       setScreen('menu')
       triggerToast('Dados do perfil e PIN atualizados!')
     } catch (err: any) {
-      alert(`Falha ao atualizar dados: ${err.message || err}`)
+      setFormError(err.message || 'Falha ao atualizar dados.')
     } finally {
       setSalvandoPerfil(false)
     }
@@ -245,6 +293,9 @@ export function MaisView({
     .join('')
     .toUpperCase()
 
+  const empresaLabel =
+    empresaAtiva?.nome_fantasia || empresaAtiva?.razao_social || 'Empresa conectada'
+
   const screenTitle: Record<SettingsScreen, { title: string; subtitle: string }> = {
     menu: { title: 'Configurações', subtitle: 'Conta, carteira de clientes e preferências' },
     clientes: { title: 'Carteira de Clientes', subtitle: `${clientes.length} clientes vinculados` },
@@ -253,29 +304,37 @@ export function MaisView({
     alcada: { title: 'Alçada Comercial', subtitle: 'Regras de desconto e sincronização' },
   }
 
+  const inputClass =
+    'w-full p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-700 bg-[#F8FAFC] dark:bg-slate-800/60 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:border-[#00A19C] focus:ring-2 focus:ring-[#00A19C]/15 transition'
+
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#F0F2F5] pb-24">
-      {/* Top App Bar Estilo WhatsApp */}
-      <header className="sticky top-0 z-20 bg-[#0F3C46] text-white shadow-sm">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#F8FAFC] dark:bg-[#090D16] pb-24">
+      {/* Top Bar */}
+      <header className="sticky top-0 z-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3.5">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             {screen !== 'menu' ? (
               <button
                 type="button"
-                onClick={() => setScreen('menu')}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 active:scale-95 transition"
+                onClick={() => {
+                  setScreen('menu')
+                  setFormError(null)
+                }}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 transition"
                 aria-label="Voltar"
               >
-                <ArrowLeft className="h-5 w-5" />
+                <ArrowLeft className="h-4 w-4" />
               </button>
             ) : (
-              <AppLogo product="vendas" size="sm" showText={true} variant="dark" />
+              <div className="md:hidden shrink-0">
+                <AppLogo product="vendas" size="sm" showText={true} variant="light" />
+              </div>
             )}
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-sm sm:text-base font-extrabold tracking-tight leading-tight">
-                {screen === 'menu' ? '• Configurações' : screenTitle[screen].title}
+              <h1 className="font-display truncate text-sm sm:text-base font-bold tracking-tight text-slate-900 dark:text-white leading-tight">
+                {screen === 'menu' ? 'Configurações & Carteira' : screenTitle[screen].title}
               </h1>
-              <p className="truncate text-[11px] text-teal-200/90">
+              <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
                 {screenTitle[screen].subtitle}
               </p>
             </div>
@@ -284,8 +343,11 @@ export function MaisView({
           {screen === 'clientes' && (
             <button
               type="button"
-              onClick={() => setScreen('novo_cliente')}
-              className="flex items-center gap-1.5 rounded-full bg-emerald-500 px-3.5 py-1.5 text-xs font-extrabold text-white shadow-xs hover:bg-emerald-400 active:scale-95 transition shrink-0"
+              onClick={() => {
+                setFormError(null)
+                setScreen('novo_cliente')
+              }}
+              className="flex items-center gap-1.5 rounded-xl bg-[#00A19C] px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-[#008C87] active:scale-95 transition shrink-0"
             >
               <UserPlus className="h-3.5 w-3.5" />
               <span>Novo</span>
@@ -294,46 +356,59 @@ export function MaisView({
         </div>
       </header>
 
-      <div className="mx-auto max-w-3xl px-3 py-3.5 sm:px-6 sm:py-5 space-y-4">
-        {/* ================= TELA PRINCIPAL: MENU ESTILO WHATSAPP ================= */}
+      <div className="mx-auto max-w-3xl px-3 py-4 sm:px-6 sm:py-6 space-y-5">
+        {formError && (
+          <div
+            role="alert"
+            className="rounded-xl border border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-500/10 p-3.5 text-xs text-rose-700 dark:text-rose-400 flex items-start gap-2"
+          >
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+            <span>{formError}</span>
+          </div>
+        )}
+
+        {/* MENU PRINCIPAL */}
         {screen === 'menu' && (
           <>
-            {/* Card de Perfil Estilo WhatsApp (Topo) */}
+            {/* Card de Perfil */}
             <button
               type="button"
-              onClick={() => setScreen('perfil')}
-              className="w-full rounded-2xl bg-white p-4 shadow-2xs border border-slate-200/70 flex items-center justify-between gap-3.5 text-left hover:bg-slate-50/80 active:scale-[0.99] transition"
+              onClick={() => {
+                setFormError(null)
+                setScreen('perfil')
+              }}
+              className="w-full rounded-xl bg-white dark:bg-slate-900 p-4 shadow-xs border border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-3.5 text-left hover:border-[#00A19C]/50 active:scale-[0.995] transition"
             >
               <div className="flex items-center gap-3.5 min-w-0 flex-1">
                 <div className="relative shrink-0">
-                  <div className="flex h-15 w-15 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white font-black text-xl shadow-sm">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-[#00A19C] to-[#0F766E] text-white font-display font-bold text-lg shadow-xs">
                     {initials}
                   </div>
                   <span
-                    className="absolute bottom-0 right-0 h-4 w-4 rounded-full bg-emerald-500 ring-2 ring-white"
+                    className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900"
                     title="Online"
                   />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <h2 className="text-base font-extrabold text-slate-900 truncate">
+                    <h2 className="font-display text-sm sm:text-base font-bold text-slate-900 dark:text-white truncate">
                       {currentUser?.nome || 'Representante Comercial'}
                     </h2>
-                    <BadgeCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <BadgeCheck className="h-4 w-4 text-[#00A19C] shrink-0" />
                   </div>
-                  <p className="text-xs text-slate-500 truncate mt-0.5">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
                     {currentUser?.email || 'Representante autorizado'}
                   </p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    <span className="inline-flex items-center rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-200/60">
+                    <span className="inline-flex items-center rounded-md bg-teal-50 dark:bg-[#00A19C]/15 px-2 py-0.5 font-mono tabular-nums text-[10px] font-semibold text-[#0F766E] dark:text-teal-300 border border-teal-200 dark:border-[#00A19C]/30">
                       Desc. máx: {limiteDesconto}%
                     </span>
                     {currentUser?.cpf ? (
-                      <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-mono font-semibold text-slate-600">
+                      <span className="inline-flex items-center rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-mono tabular-nums font-semibold text-slate-600 dark:text-slate-300">
                         CPF: {currentUser.cpf}
                       </span>
                     ) : (
-                      <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                      <span className="inline-flex items-center rounded-md bg-amber-50 dark:bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
                         Alterar PIN / Dados
                       </span>
                     )}
@@ -343,54 +418,55 @@ export function MaisView({
               <ChevronRight className="h-5 w-5 text-slate-400 shrink-0" />
             </button>
 
-            {/* Grupo 1: Comercial & Carteira de Clientes */}
+            {/* Grupo 1: Comercial & Clientes */}
             <div className="space-y-1.5">
-              <p className="px-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+              <p className="px-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                 Comercial & Clientes
               </p>
-              <div className="rounded-2xl bg-white shadow-2xs border border-slate-200/70 divide-y divide-slate-100 overflow-hidden">
-                {/* Item: Minha Carteira de Clientes */}
+              <div className="rounded-xl bg-white dark:bg-slate-900 shadow-xs border border-slate-200/80 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden">
                 <button
                   type="button"
                   onClick={() => setScreen('clientes')}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 active:bg-slate-100 transition"
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
                 >
                   <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white shadow-2xs">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#00A19C]/10 text-[#00A19C]">
                       <Users className="h-5 w-5" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-slate-900 truncate">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                         Minha Carteira de Clientes
                       </p>
-                      <p className="text-xs text-slate-500 truncate mt-0.5">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
                         Consultar clientes ou iniciar um novo pedido
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-extrabold text-emerald-700 border border-emerald-200/60">
+                    <span className="rounded-full bg-[#00A19C]/10 px-2.5 py-0.5 font-mono tabular-nums text-xs font-bold text-[#00A19C]">
                       {clientes.length}
                     </span>
                     <ChevronRight className="h-4 w-4 text-slate-400" />
                   </div>
                 </button>
 
-                {/* Item: Cadastrar Novo Cliente */}
                 <button
                   type="button"
-                  onClick={() => setScreen('novo_cliente')}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 active:bg-slate-100 transition"
+                  onClick={() => {
+                    setFormError(null)
+                    setScreen('novo_cliente')
+                  }}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
                 >
                   <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-white shadow-2xs">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                       <UserPlus className="h-5 w-5" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-slate-900 truncate">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                         Cadastrar Novo Cliente
                       </p>
-                      <p className="text-xs text-slate-500 truncate mt-0.5">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
                         Preenchimento automático por CEP e envio ao ERP
                       </p>
                     </div>
@@ -398,27 +474,26 @@ export function MaisView({
                   <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
                 </button>
 
-                {/* Item: Alçada de Desconto & Regras */}
                 <button
                   type="button"
                   onClick={() => setScreen('alcada')}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 active:bg-slate-100 transition"
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
                 >
                   <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white shadow-2xs">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
                       <Percent className="h-5 w-5" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-slate-900 truncate">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                         Alçada de Desconto & Regras
                       </p>
-                      <p className="text-xs text-slate-500 truncate mt-0.5">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
                         Limite máximo de {limiteDesconto}% por item no pedido
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-extrabold text-amber-800 border border-amber-200">
+                    <span className="rounded-full bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-2.5 py-0.5 font-mono tabular-nums text-xs font-bold text-amber-700 dark:text-amber-400">
                       {limiteDesconto}%
                     </span>
                     <ChevronRight className="h-4 w-4 text-slate-400" />
@@ -427,27 +502,29 @@ export function MaisView({
               </div>
             </div>
 
-            {/* Grupo 2: Conta, Empresa & Sincronização */}
+            {/* Grupo 2: Conta, Aparência & Sincronização */}
             <div className="space-y-1.5">
-              <p className="px-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+              <p className="px-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                 Conta & Aplicativo
               </p>
-              <div className="rounded-2xl bg-white shadow-2xs border border-slate-200/70 divide-y divide-slate-100 overflow-hidden">
-                {/* Item: Conta & PIN */}
+              <div className="rounded-xl bg-white dark:bg-slate-900 shadow-xs border border-slate-200/80 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden">
                 <button
                   type="button"
-                  onClick={() => setScreen('perfil')}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 active:bg-slate-100 transition"
+                  onClick={() => {
+                    setFormError(null)
+                    setScreen('perfil')
+                  }}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
                 >
                   <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500 text-white shadow-2xs">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
                       <KeyRound className="h-5 w-5" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-slate-900 truncate">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                         Segurança & PIN de Acesso
                       </p>
-                      <p className="text-xs text-slate-500 truncate mt-0.5">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
                         Alterar PIN numérico, telefone e e-mail
                       </p>
                     </div>
@@ -455,40 +532,60 @@ export function MaisView({
                   <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
                 </button>
 
-                {/* Item: Empresa Ativa */}
+                <button
+                  type="button"
+                  onClick={onToggleTheme}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-amber-400">
+                      {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                        Aparência da Interface
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                        {theme === 'dark' ? 'Modo Escuro ativo (toque para Light)' : 'Modo Claro padrão (toque para Dark)'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                    {theme === 'dark' ? 'Escuro' : 'Claro'}
+                  </span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => {
                     if (empresasCount > 1) {
                       onSwitchEmpresa()
                     } else {
-                      triggerToast(
-                        `Empresa ativa: ${empresaAtiva?.nome_fantasia || empresaAtiva?.razao_social || 'A&C Distribuidora'}`
-                      )
+                      triggerToast(`Empresa ativa: ${empresaLabel}`)
                     }
                   }}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 active:bg-slate-100 transition"
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
                 >
                   <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-500 text-white shadow-2xs">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400">
                       <Building2 className="h-5 w-5" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-slate-900 truncate">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                         Empresa Representada
                       </p>
-                      <p className="text-xs text-slate-500 truncate mt-0.5">
-                        {empresaAtiva?.nome_fantasia || empresaAtiva?.razao_social || 'A&C Distribuidora'}
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                        {empresaLabel}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {empresasCount > 1 ? (
-                      <span className="rounded-full bg-sky-50 px-2.5 py-0.5 text-[11px] font-bold text-sky-700 border border-sky-200">
+                      <span className="rounded-full bg-[#00A19C]/10 px-2.5 py-0.5 text-[11px] font-semibold text-[#00A19C]">
                         Trocar ({empresasCount})
                       </span>
                     ) : (
-                      <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-600">
+                      <span className="rounded-full bg-emerald-50 dark:bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                         Ativa
                       </span>
                     )}
@@ -496,23 +593,22 @@ export function MaisView({
                   </div>
                 </button>
 
-                {/* Item: Sincronizar Catálogo Agora */}
                 {onReloadData && (
                   <button
                     type="button"
                     onClick={handleSincronizarAgora}
                     disabled={sincronizando}
-                    className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 active:bg-slate-100 transition disabled:opacity-60"
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50 transition disabled:opacity-60"
                   >
                     <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-500 text-white shadow-2xs">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#00A19C]/10 text-[#00A19C]">
                         <RefreshCw className={`h-5 w-5 ${sincronizando ? 'animate-spin' : ''}`} />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-bold text-slate-900 truncate">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                           Sincronizar Dados Agora
                         </p>
-                        <p className="text-xs text-slate-500 truncate mt-0.5">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
                           {sincronizando
                             ? 'Atualizando catálogo, estoque e clientes…'
                             : 'Atualizar produtos, tabelas de preço e clientes'}
@@ -526,18 +622,18 @@ export function MaisView({
             </div>
 
             {/* Grupo 3: Sessão */}
-            <div className="rounded-2xl bg-white shadow-2xs border border-slate-200/70 overflow-hidden">
+            <div className="rounded-xl bg-white dark:bg-slate-900 shadow-xs border border-slate-200/80 dark:border-slate-800 overflow-hidden">
               <button
                 type="button"
                 onClick={onLogout}
-                className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-rose-50/60 active:bg-rose-100/60 transition"
+                className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-rose-50/60 dark:hover:bg-rose-500/10 transition"
               >
                 <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600 border border-rose-200/60">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200/60 dark:border-rose-500/20">
                     <LogOut className="h-5 w-5" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold text-rose-600 truncate">
+                    <p className="text-sm font-semibold text-rose-600 dark:text-rose-400 truncate">
                       Sair do Aplicativo
                     </p>
                     <p className="text-xs text-slate-400 truncate mt-0.5">
@@ -549,24 +645,22 @@ export function MaisView({
               </button>
             </div>
 
-            {/* Rodapé Institucional */}
             <div className="flex flex-col items-center justify-center pt-3 pb-2 opacity-80">
               <AppLogo
                 product="vendas"
                 size="sm"
                 showText={true}
                 showSublabel={true}
-                sublabel="Ecossistema Thothfy • Força de Vendas"
+                sublabel="Ecossistema Thothfy • Linha Business"
               />
             </div>
           </>
         )}
 
-        {/* ================= SUB-TELA: CARTEIRA DE CLIENTES (ESTILO CONTATOS WHATSAPP) ================= */}
+        {/* SUB-TELA: CARTEIRA DE CLIENTES */}
         {screen === 'clientes' && (
           <div className="space-y-3">
-            {/* Barra de Busca Fixa */}
-            <div className="rounded-2xl bg-white p-3 shadow-2xs border border-slate-200/70">
+            <div className="rounded-xl bg-white dark:bg-slate-900 p-3 shadow-xs border border-slate-200/80 dark:border-slate-800">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <input
@@ -574,13 +668,13 @@ export function MaisView({
                   value={clienteSearch}
                   onChange={(e) => setClienteSearch(e.target.value)}
                   placeholder="Buscar por razão social, fantasia, CNPJ ou cidade…"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-9 text-xs font-medium text-slate-900 outline-none focus:border-emerald-600 focus:bg-white"
+                  className="w-full rounded-xl border border-slate-200/80 dark:border-slate-700 bg-[#F8FAFC] dark:bg-slate-800 py-2.5 pl-10 pr-9 text-xs font-medium text-slate-900 dark:text-white outline-none focus:border-[#00A19C]"
                 />
                 {clienteSearch && (
                   <button
                     type="button"
                     onClick={() => setClienteSearch('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 hover:bg-slate-100"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -588,15 +682,16 @@ export function MaisView({
               </div>
             </div>
 
-            {/* Lista de Clientes Estilo Contatos do WhatsApp */}
-            <div className="rounded-2xl bg-white shadow-2xs border border-slate-200/70 divide-y divide-slate-100 overflow-hidden">
+            <div className="rounded-xl bg-white dark:bg-slate-900 shadow-xs border border-slate-200/80 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden">
               {filteredClientes.length === 0 ? (
                 <div className="p-10 text-center space-y-3">
-                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400">
                     <Users className="h-6 w-6" />
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-slate-700">Nenhum cliente encontrado</p>
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                      Nenhum cliente encontrado
+                    </p>
                     <p className="text-xs text-slate-400 mt-0.5">
                       Cadastre um novo cliente para iniciar seus pedidos
                     </p>
@@ -604,7 +699,7 @@ export function MaisView({
                   <button
                     type="button"
                     onClick={() => setScreen('novo_cliente')}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-700"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#00A19C] px-4 py-2.5 text-xs font-semibold text-white shadow-xs hover:bg-[#008C87]"
                   >
                     <UserPlus className="h-4 w-4" />
                     <span>Cadastrar Novo Cliente</span>
@@ -621,28 +716,30 @@ export function MaisView({
                   return (
                     <div
                       key={c.id}
-                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50/80 transition"
+                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition"
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-800 font-extrabold text-xs border border-teal-200/60">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#00A19C]/10 text-[#00A19C] font-bold text-xs border border-[#00A19C]/20">
                           {cliInitials}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
-                            <p className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                            <p className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-white truncate">
                               {c.nome_fantasia || c.razao_social}
                             </p>
                             {c.bloqueado && (
-                              <span className="shrink-0 rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold text-rose-700">
+                              <span className="shrink-0 rounded-full bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-rose-700 dark:text-rose-400">
                                 Bloqueado
                               </span>
                             )}
                           </div>
                           {c.nome_fantasia && c.razao_social !== c.nome_fantasia && (
-                            <p className="text-[11px] text-slate-500 truncate">{c.razao_social}</p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                              {c.razao_social}
+                            </p>
                           )}
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-400 mt-0.5">
-                            <span className="font-mono">{c.cpf_cnpj}</span>
+                            <span className="font-mono tabular-nums">{c.cpf_cnpj}</span>
                             {c.cidade && (
                               <span>
                                 • {c.cidade}/{c.estado}
@@ -656,7 +753,7 @@ export function MaisView({
                         <button
                           type="button"
                           onClick={() => onSelectClienteForOrder(c)}
-                          className="flex items-center gap-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 px-3 py-2 text-[11px] font-extrabold text-white shadow-2xs transition shrink-0"
+                          className="flex items-center gap-1 rounded-xl bg-[#00A19C] hover:bg-[#008C87] active:scale-95 px-3 py-2 text-[11px] font-semibold text-white shadow-2xs transition shrink-0"
                         >
                           <ShoppingBag className="h-3.5 w-3.5" />
                           <span>Vender</span>
@@ -670,24 +767,23 @@ export function MaisView({
           </div>
         )}
 
-        {/* ================= SUB-TELA: CADASTRAR NOVO CLIENTE ================= */}
+        {/* SUB-TELA: CADASTRAR NOVO CLIENTE */}
         {screen === 'novo_cliente' && (
           <form onSubmit={handleSalvarNovoCliente} className="space-y-4">
-            <div className="rounded-2xl bg-emerald-50 border border-emerald-200/70 p-3.5 text-xs text-emerald-900 flex items-start gap-2.5">
-              <Sparkles className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="rounded-xl bg-teal-50/80 dark:bg-[#00A19C]/10 border border-teal-200/80 dark:border-[#00A19C]/20 p-3.5 text-xs text-slate-800 dark:text-teal-200 flex items-start gap-2.5">
+              <Sparkles className="h-4 w-4 text-[#00A19C] shrink-0 mt-0.5" />
               <span className="leading-relaxed">
-                O cliente cadastrado é vinculado automaticamente à sua carteira de representante e sincronizado com o <strong>Omie ERP</strong>.
+                O cliente cadastrado é vinculado automaticamente à sua carteira e sincronizado com o ERP ativo.
               </span>
             </div>
 
-            {/* Bloco 1: Identificação */}
-            <div className="rounded-2xl bg-white p-4 shadow-2xs border border-slate-200/70 space-y-3.5 text-xs">
-              <h3 className="font-extrabold text-slate-900 text-sm border-b border-slate-100 pb-2">
+            <div className="rounded-xl bg-white dark:bg-slate-900 p-4 shadow-xs border border-slate-200/80 dark:border-slate-800 space-y-3.5 text-xs">
+              <h3 className="font-display font-bold text-slate-900 dark:text-white text-sm border-b border-slate-100 dark:border-slate-800 pb-2">
                 1. Identificação do Cliente
               </h3>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Razão Social / Nome Completo *
                 </label>
                 <input
@@ -696,49 +792,57 @@ export function MaisView({
                   value={clienteForm.razao_social}
                   onChange={(e) => setClienteForm({ ...clienteForm, razao_social: e.target.value })}
                   placeholder="Ex: Comercial Silva Ltda ou João da Silva"
-                  className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-emerald-600"
+                  className={inputClass}
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Nome Fantasia</label>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Nome Fantasia
+                  </label>
                   <input
                     type="text"
                     value={clienteForm.nome_fantasia || ''}
                     onChange={(e) => setClienteForm({ ...clienteForm, nome_fantasia: e.target.value })}
                     placeholder="Nome comercial da loja"
-                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-emerald-600"
+                    className={inputClass}
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">CPF ou CNPJ *</label>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    CPF ou CNPJ *
+                  </label>
                   <input
                     type="text"
                     required
                     value={clienteForm.cpf_cnpj}
-                    onChange={(e) => setClienteForm({ ...clienteForm, cpf_cnpj: e.target.value })}
+                    onChange={(e) =>
+                      setClienteForm({ ...clienteForm, cpf_cnpj: formatCpfCnpjInput(e.target.value) })
+                    }
                     placeholder="00.000.000/0000-00"
-                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 font-mono focus:bg-white focus:outline-emerald-600"
+                    className={`${inputClass} font-mono tabular-nums`}
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
                     <Phone className="h-3.5 w-3.5 text-slate-400" /> Telefone / WhatsApp
                   </label>
                   <input
                     type="tel"
                     value={clienteForm.telefone || ''}
-                    onChange={(e) => setClienteForm({ ...clienteForm, telefone: e.target.value })}
+                    onChange={(e) =>
+                      setClienteForm({ ...clienteForm, telefone: formatPhoneInput(e.target.value) })
+                    }
                     placeholder="(00) 00000-0000"
-                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-emerald-600"
+                    className={`${inputClass} font-mono tabular-nums`}
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
                     <Mail className="h-3.5 w-3.5 text-slate-400" /> E-mail para NFe / Pedidos
                   </label>
                   <input
@@ -746,20 +850,39 @@ export function MaisView({
                     value={clienteForm.email || ''}
                     onChange={(e) => setClienteForm({ ...clienteForm, email: e.target.value })}
                     placeholder="cliente@empresa.com.br"
-                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-emerald-600"
+                    className={inputClass}
                   />
                 </div>
               </div>
+
+              {tabelas.length > 0 && (
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                    <Tag className="h-3.5 w-3.5 text-slate-400" /> Tabela de Preço Padrão
+                  </label>
+                  <select
+                    value={clienteForm.tabela_preco_id || ''}
+                    onChange={(e) => setClienteForm({ ...clienteForm, tabela_preco_id: e.target.value })}
+                    className={inputClass}
+                  >
+                    <option value="">Usar tabela padrão da empresa</option>
+                    {tabelas.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.nome}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
-            {/* Bloco 2: Endereço com Busca Automática de CEP */}
-            <div className="rounded-2xl bg-white p-4 shadow-2xs border border-slate-200/70 space-y-3.5 text-xs">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
-                  <MapPin className="h-4 w-4 text-emerald-600" /> 2. Endereço de Entrega / Faturamento
+            <div className="rounded-xl bg-white dark:bg-slate-900 p-4 shadow-xs border border-slate-200/80 dark:border-slate-800 space-y-3.5 text-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+                <h3 className="font-display font-bold text-slate-900 dark:text-white text-sm flex items-center gap-1.5">
+                  <MapPin className="h-4 w-4 text-[#00A19C]" /> 2. Endereço de Entrega / Faturamento
                 </h3>
                 {buscandoCep && (
-                  <span className="text-[11px] font-bold text-emerald-600 flex items-center gap-1">
+                  <span className="text-[11px] font-semibold text-[#00A19C] flex items-center gap-1">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" /> Consultando CEP…
                   </span>
                 )}
@@ -767,61 +890,63 @@ export function MaisView({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">CEP</label>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">CEP</label>
                   <input
                     type="text"
                     inputMode="numeric"
                     value={clienteForm.cep || ''}
                     onChange={(e) => handleCepChange(e.target.value)}
                     placeholder="00000-000"
-                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 font-mono focus:bg-white focus:outline-emerald-600"
+                    className={`${inputClass} font-mono tabular-nums`}
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <label className="block font-bold text-slate-700 mb-1">Logradouro / Rua</label>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Logradouro / Rua
+                  </label>
                   <input
                     type="text"
                     value={clienteForm.logradouro || ''}
                     onChange={(e) => setClienteForm({ ...clienteForm, logradouro: e.target.value })}
                     placeholder="Rua, Avenida, Rodovia…"
-                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-emerald-600"
+                    className={inputClass}
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Número</label>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Número</label>
                   <input
                     type="text"
                     value={clienteForm.numero || ''}
                     onChange={(e) => setClienteForm({ ...clienteForm, numero: e.target.value })}
                     placeholder="Nº"
-                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-emerald-600"
+                    className={inputClass}
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Bairro</label>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Bairro</label>
                   <input
                     type="text"
                     value={clienteForm.bairro || ''}
                     onChange={(e) => setClienteForm({ ...clienteForm, bairro: e.target.value })}
                     placeholder="Bairro"
-                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-emerald-600"
+                    className={inputClass}
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Cidade</label>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Cidade</label>
                   <input
                     type="text"
                     value={clienteForm.cidade || ''}
                     onChange={(e) => setClienteForm({ ...clienteForm, cidade: e.target.value })}
                     placeholder="Cidade"
-                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-emerald-600"
+                    className={inputClass}
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">UF</label>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">UF</label>
                   <input
                     type="text"
                     maxLength={2}
@@ -830,19 +955,21 @@ export function MaisView({
                       setClienteForm({ ...clienteForm, estado: e.target.value.toUpperCase() })
                     }
                     placeholder="UF"
-                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 uppercase font-mono focus:bg-white focus:outline-emerald-600"
+                    className={`${inputClass} uppercase font-mono`}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Observações Comerciais</label>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Observações Comerciais
+                </label>
                 <textarea
                   rows={2}
                   value={clienteForm.observacoes || ''}
                   onChange={(e) => setClienteForm({ ...clienteForm, observacoes: e.target.value })}
                   placeholder="Horário de recebimento, referências, inscrição estadual…"
-                  className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-emerald-600"
+                  className={inputClass}
                 />
               </div>
             </div>
@@ -851,14 +978,14 @@ export function MaisView({
               <button
                 type="button"
                 onClick={() => setScreen('menu')}
-                className="flex-1 py-3.5 rounded-xl border border-slate-300 bg-white text-slate-700 font-bold text-xs hover:bg-slate-50"
+                className="flex-1 py-3 rounded-xl border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-semibold text-xs hover:bg-slate-50 dark:hover:bg-slate-800"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={salvandoCliente}
-                className="flex-[2] flex items-center justify-center gap-2 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md shadow-emerald-600/20 disabled:opacity-50"
+                className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl bg-[#00A19C] hover:bg-[#008C87] text-white font-semibold text-xs shadow-sm disabled:opacity-50"
               >
                 {salvandoCliente && <Loader2 className="h-4 w-4 animate-spin" />}
                 <span>Salvar Cliente & Sincronizar ERP</span>
@@ -867,82 +994,91 @@ export function MaisView({
           </form>
         )}
 
-        {/* ================= SUB-TELA: PERFIL & PIN DE SEGURANÇA ================= */}
+        {/* SUB-TELA: PERFIL & PIN */}
         {screen === 'perfil' && (
           <form onSubmit={handleSalvarPerfil} className="space-y-4">
-            <div className="rounded-2xl bg-white p-4 shadow-2xs border border-slate-200/70 space-y-3.5 text-xs">
-              <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white font-black text-base">
+            <div className="rounded-xl bg-white dark:bg-slate-900 p-4 shadow-xs border border-slate-200/80 dark:border-slate-800 space-y-3.5 text-xs">
+              <div className="flex items-center gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#00A19C] to-[#0F766E] text-white font-display font-bold text-base">
                   {initials}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="font-extrabold text-sm text-slate-900 truncate">
+                  <h3 className="font-display font-bold text-sm text-slate-900 dark:text-white truncate">
                     {currentUser?.nome || 'Representante'}
                   </h3>
-                  <p className="text-[11px] text-slate-500 truncate">
-                    Código Omie ERP: <span className="font-mono">{currentUser?.id?.slice(0, 8)}</span>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                    ID Vendedor: <span className="font-mono tabular-nums">{currentUser?.id?.slice(0, 8)}</span>
                   </p>
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Nome Completo</label>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Nome Completo
+                </label>
                 <input
                   type="text"
                   required
                   value={nome}
                   onChange={(e) => setNome(e.target.value)}
-                  className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-emerald-600"
+                  className={inputClass}
                 />
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">E-mail Corporativo</label>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  E-mail Corporativo
+                </label>
                 <input
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-emerald-600"
+                  className={inputClass}
                 />
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Telefone / WhatsApp</label>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Telefone / WhatsApp
+                </label>
                 <input
                   type="tel"
                   value={telefone}
-                  onChange={(e) => setTelefone(e.target.value)}
+                  onChange={(e) => setTelefone(formatPhoneInput(e.target.value))}
                   placeholder="(00) 00000-0000"
-                  className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-emerald-600"
+                  className={`${inputClass} font-mono tabular-nums`}
                 />
               </div>
             </div>
 
-            {/* Bloco PIN de Acesso */}
-            <div className="rounded-2xl bg-white p-4 shadow-2xs border border-slate-200/70 space-y-3.5 text-xs">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <div className="rounded-xl bg-white dark:bg-slate-900 p-4 shadow-xs border border-slate-200/80 dark:border-slate-800 space-y-3.5 text-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
                 <div className="flex items-center gap-2">
-                  <KeyRound className="h-4 w-4 text-indigo-600" />
-                  <h3 className="font-extrabold text-sm text-slate-900">PIN Numérico de Acesso</h3>
+                  <KeyRound className="h-4 w-4 text-[#00A19C]" />
+                  <h3 className="font-display font-bold text-sm text-slate-900 dark:text-white">
+                    PIN Numérico de Acesso
+                  </h3>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowPin(!showPin)}
-                  className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-800"
+                  className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                 >
                   {showPin ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                   <span>{showPin ? 'Ocultar' : 'Mostrar'}</span>
                 </button>
               </div>
 
-              <p className="text-[11px] text-slate-500 leading-relaxed">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
                 O PIN numérico (4 a 6 dígitos) é usado para entrar rapidamente no aplicativo. Deixe em branco caso não queira alterar seu PIN atual.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Novo PIN (4 a 6 dígitos)</label>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Novo PIN (4 a 6 dígitos)
+                  </label>
                   <input
                     type={showPin ? 'text' : 'password'}
                     maxLength={6}
@@ -950,11 +1086,13 @@ export function MaisView({
                     value={novoPin}
                     onChange={(e) => setNovoPin(e.target.value.replace(/\D/g, ''))}
                     placeholder="••••"
-                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 font-mono tracking-widest text-center text-sm focus:bg-white focus:outline-emerald-600"
+                    className={`${inputClass} font-mono tabular-nums tracking-widest text-center text-sm`}
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Confirmar Novo PIN</label>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Confirmar Novo PIN
+                  </label>
                   <input
                     type={showPin ? 'text' : 'password'}
                     maxLength={6}
@@ -962,7 +1100,7 @@ export function MaisView({
                     value={confirmaPin}
                     onChange={(e) => setConfirmaPin(e.target.value.replace(/\D/g, ''))}
                     placeholder="••••"
-                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50/70 font-mono tracking-widest text-center text-sm focus:bg-white focus:outline-emerald-600"
+                    className={`${inputClass} font-mono tabular-nums tracking-widest text-center text-sm`}
                   />
                 </div>
               </div>
@@ -972,14 +1110,14 @@ export function MaisView({
               <button
                 type="button"
                 onClick={() => setScreen('menu')}
-                className="flex-1 py-3.5 rounded-xl border border-slate-300 bg-white text-slate-700 font-bold text-xs hover:bg-slate-50"
+                className="flex-1 py-3 rounded-xl border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-semibold text-xs hover:bg-slate-50 dark:hover:bg-slate-800"
               >
                 Voltar
               </button>
               <button
                 type="submit"
                 disabled={salvandoPerfil}
-                className="flex-[2] flex items-center justify-center gap-2 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md shadow-emerald-600/20 disabled:opacity-50"
+                className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl bg-[#00A19C] hover:bg-[#008C87] text-white font-semibold text-xs shadow-sm disabled:opacity-50"
               >
                 {salvandoPerfil && <Loader2 className="h-4 w-4 animate-spin" />}
                 <span>Salvar Dados & PIN</span>
@@ -988,35 +1126,35 @@ export function MaisView({
           </form>
         )}
 
-        {/* ================= SUB-TELA: ALÇADA COMERCIAL & REGRAS ================= */}
+        {/* SUB-TELA: ALÇADA COMERCIAL */}
         {screen === 'alcada' && (
           <div className="space-y-3">
-            <div className="rounded-2xl bg-white p-5 shadow-2xs border border-slate-200/70 space-y-4">
+            <div className="rounded-xl bg-white dark:bg-slate-900 p-5 shadow-xs border border-slate-200/80 dark:border-slate-800 space-y-4">
               <div className="flex items-center gap-3.5">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-sm">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
                   <Percent className="h-6 w-6" />
                 </div>
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-amber-600">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
                     Limite Individual no Pedido
                   </p>
-                  <h3 className="text-2xl font-black text-slate-900">
+                  <h3 className="font-display font-mono tabular-nums text-2xl font-bold text-slate-900 dark:text-white">
                     Até {limiteDesconto}% de desconto
                   </h3>
                 </div>
               </div>
-              <p className="text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-3">
-                Você pode aplicar descontos diretos de até <strong>{limiteDesconto}%</strong> por item diretamente no carrinho de compras, além de selecionar as <strong>Tabelas de Preço</strong> promocionais ou de atacado sincronizadas com o ERP.
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed border-t border-slate-100 dark:border-slate-800 pt-3">
+                Você pode aplicar descontos diretos de até <strong className="font-mono">{limiteDesconto}%</strong> por item diretamente no carrinho, além de selecionar as <strong>Tabelas de Preço</strong> sincronizadas com o ERP.
               </p>
             </div>
 
-            <div className="rounded-2xl bg-white p-5 shadow-2xs border border-slate-200/70 space-y-3">
-              <div className="flex items-center gap-2.5 text-emerald-700 font-extrabold text-sm">
+            <div className="rounded-xl bg-white dark:bg-slate-900 p-5 shadow-xs border border-slate-200/80 dark:border-slate-800 space-y-3">
+              <div className="flex items-center gap-2.5 text-[#00A19C] font-bold text-sm">
                 <ShieldCheck className="h-5 w-5" />
-                <span>Integração ERP Ativa (Omie ERP)</span>
+                <span>Integração ERP Ativa</span>
               </div>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Todos os pedidos transmitidos e novos clientes cadastrados são enviados automaticamente para o faturamento na <strong>Omie ERP</strong> já vinculados ao seu código de representante comercial.
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                Todos os pedidos transmitidos e novos clientes cadastrados são sincronizados automaticamente com o ERP configurado para faturamento vinculados ao seu código de representante.
               </p>
             </div>
           </div>
@@ -1025,8 +1163,8 @@ export function MaisView({
 
       {/* Toast Flutuante */}
       {toastMsg && (
-        <div className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 flex items-center gap-2 rounded-full bg-slate-900/95 px-4 py-2.5 text-xs font-semibold text-white shadow-lg backdrop-blur max-w-[90vw] truncate">
-          <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+        <div className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 flex items-center gap-2 rounded-full bg-slate-900/95 dark:bg-slate-800 border border-slate-700 px-4 py-2.5 text-xs font-semibold text-white shadow-lg backdrop-blur max-w-[90vw] truncate">
+          <CheckCircle2 className="h-4 w-4 text-[#00A19C] shrink-0" />
           <span className="truncate">{toastMsg}</span>
         </div>
       )}
