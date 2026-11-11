@@ -856,18 +856,6 @@ export function MaisView({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Nome Fantasia
-                  </label>
-                  <input
-                    type="text"
-                    value={clienteForm.nome_fantasia || ''}
-                    onChange={(e) => setClienteForm({ ...clienteForm, nome_fantasia: e.target.value })}
-                    placeholder="Nome comercial da loja"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
                     CPF ou CNPJ *
                   </label>
                   <input
@@ -881,6 +869,45 @@ export function MaisView({
                     className={`${inputClass} font-mono tabular-nums`}
                   />
                 </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300">
+                      Inscrição Estadual (IE)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setClienteForm({ ...clienteForm, inscricao_estadual: 'ISENTO' })}
+                      className="text-[10px] font-semibold text-[#00A19C] hover:underline"
+                    >
+                      ISENTO
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={clienteForm.inscricao_estadual || ''}
+                    onChange={(e) =>
+                      setClienteForm({
+                        ...clienteForm,
+                        inscricao_estadual: e.target.value.toUpperCase(),
+                      })
+                    }
+                    placeholder="Número IE ou ISENTO"
+                    className={`${inputClass} font-mono tabular-nums`}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Nome Fantasia
+                </label>
+                <input
+                  type="text"
+                  value={clienteForm.nome_fantasia || ''}
+                  onChange={(e) => setClienteForm({ ...clienteForm, nome_fantasia: e.target.value })}
+                  placeholder="Nome comercial da loja"
+                  className={inputClass}
+                />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

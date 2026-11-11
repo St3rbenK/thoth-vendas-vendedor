@@ -885,7 +885,18 @@ export async function getVendedorMeta(): Promise<VendedorMeta | null> {
   }
 }
 
-// 10. Cadastro de Novo Cliente (vinculado ao vendedor e sincronizado com ERP)
+// 10. Cadastro e Atualização de Cliente (vinculado ao vendedor e sincronizado com ERP)
+export async function getClienteDetalhes(id: string): Promise<Cliente | null> {
+  const data = await fetchWithAuth(`/api/clientes/${id}`)
+  if (!data || !data.cliente) return null
+  const clientes = (await get<Cliente[]>('offline_clientes')) || []
+  const updated = clientes.some((c) => c.id === data.cliente.id)
+    ? clientes.map((c) => (c.id === data.cliente.id ? { ...c, ...data.cliente } : c))
+    : [data.cliente, ...clientes]
+  await set('offline_clientes', updated)
+  return data.cliente
+}
+
 export async function criarCliente(payload: NovoClientePayload): Promise<Cliente> {
   const data = await fetchWithAuth('/api/clientes', {
     method: 'POST',
@@ -893,6 +904,22 @@ export async function criarCliente(payload: NovoClientePayload): Promise<Cliente
   })
   if (!data || !data.cliente) {
     throw new Error(data?.error || 'Erro ao cadastrar cliente')
+  }
+
+  const clientes = (await get<Cliente[]>('offline_clientes')) || []
+  const updated = [data.cliente, ...clientes.filter((c) => c.id !== data.cliente.id)]
+  await set('offline_clientes', updated)
+
+  return data.cliente
+}
+
+export async function atualizarCliente(id: string, payload: Partial<NovoClientePayload>): Promise<Cliente> {
+  const data = await fetchWithAuth(`/api/clientes/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+  if (!data || !data.cliente) {
+    throw new Error(data?.error || 'Erro ao atualizar cliente')
   }
 
   const clientes = (await get<Cliente[]>('offline_clientes')) || []

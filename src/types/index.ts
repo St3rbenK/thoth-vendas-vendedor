@@ -39,10 +39,16 @@ export interface Cliente {
   razao_social: string
   nome_fantasia?: string
   cpf_cnpj: string
+  inscricao_estadual?: string
   email?: string
   telefone?: string
   celular?: string
   contato_nome?: string
+  cep?: string
+  logradouro?: string
+  numero?: string
+  complemento?: string
+  bairro?: string
   cidade?: string
   estado?: string
   tabela_preco_id?: string
@@ -51,6 +57,7 @@ export interface Cliente {
   saldo_devedor: number
   bloqueado: boolean
   motivo_bloqueio?: string
+  observacoes?: string
   ultimo_pedido_em?: string
   ultimo_pedido_valor?: number
   total_pedidos?: number

@@ -6,6 +6,7 @@ import { ClientSelectModal } from './components/ClientSelectModal'
 import { NewClientModal } from './components/NewClientModal'
 import { VendedorAuthScreen } from './components/VendedorAuthScreen'
 import { DesktopSidebar, MobileBottomNav, TabType } from './components/Navigation'
+import { ClientesView } from './components/ClientesView'
 import { PedidosView } from './components/PedidosView'
 import { MetaView } from './components/MetaView'
 import { MaisView } from './components/MaisView'
@@ -126,6 +127,7 @@ export function App() {
   const [cartOpen, setCartOpen] = useState(false)
   const [clienteModalOpen, setClienteModalOpen] = useState(false)
   const [newClientModalOpen, setNewClientModalOpen] = useState(false)
+  const [editingCliente, setEditingCliente] = useState<Cliente | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [empresaNome, setEmpresaNome] = useState('ThothVendas')
@@ -859,6 +861,34 @@ export function App() {
           </>
         )}
 
+        {/* ABA: CLIENTES */}
+        {activeTab === 'clientes' && (
+          <ClientesView
+            clientes={clientes}
+            selectedCliente={selectedCliente}
+            isOffline={isOffline}
+            onRefresh={() => carregarDados({ forceNetwork: true })}
+            onNewClient={() => {
+              setEditingCliente(null)
+              setNewClientModalOpen(true)
+            }}
+            onEditClient={(c) => {
+              setEditingCliente(c)
+              setNewClientModalOpen(true)
+            }}
+            onSelectForOrder={(c) => {
+              setSelectedCliente(c)
+              setActiveTab('produtos')
+              showToast(`Cliente ${c.razao_social} selecionado para o pedido!`)
+            }}
+            onClientLoaded={(fresh) => {
+              setClientes((prev) => prev.map((item) => (item.id === fresh.id ? { ...item, ...fresh } : item)))
+              setSelectedCliente((prev) => (prev?.id === fresh.id ? { ...prev, ...fresh } : prev))
+            }}
+            onNotify={showToast}
+          />
+        )}
+
         {/* ABA: PEDIDOS E ORÇAMENTOS */}
         {activeTab === 'pedidos' && (
           <PedidosView
@@ -963,19 +993,29 @@ export function App() {
         }}
         onNewClient={() => {
           setClienteModalOpen(false)
+          setEditingCliente(null)
           setNewClientModalOpen(true)
         }}
       />
 
-      {/* Modal Rápido de Cadastro de Novo Cliente */}
+      {/* Modal Rápido de Cadastro / Edição de Cliente */}
       <NewClientModal
         isOpen={newClientModalOpen}
-        onClose={() => setNewClientModalOpen(false)}
+        onClose={() => {
+          setNewClientModalOpen(false)
+          setEditingCliente(null)
+        }}
         tabelas={tabelas}
+        editingCliente={editingCliente}
         onCreated={(c) => {
-          setClientes((prev) => [c, ...prev])
+          setClientes((prev) => [c, ...prev.filter((item) => item.id !== c.id)])
           setSelectedCliente(c)
           showToast(`Cliente ${c.razao_social} cadastrado e selecionado!`)
+        }}
+        onUpdated={(c) => {
+          setClientes((prev) => prev.map((item) => (item.id === c.id ? { ...item, ...c } : item)))
+          setSelectedCliente((prev) => (prev?.id === c.id ? { ...prev, ...c } : prev))
+          showToast(`Dados de ${c.razao_social} atualizados e enviados ao ERP!`)
         }}
       />
 

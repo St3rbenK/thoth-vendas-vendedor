@@ -4,6 +4,7 @@ import {
   ClipboardList,
   Target,
   Settings,
+  Users,
   Building2,
   LogOut,
   ChevronRight,
@@ -15,7 +16,7 @@ import { AppLogo } from './AppLogo'
 import type { EmpresaVinculo, UsuarioVendedor } from '../types'
 import type { ThemeMode } from '../hooks/useTheme'
 
-export type TabType = 'produtos' | 'pedidos' | 'meta' | 'mais'
+export type TabType = 'produtos' | 'clientes' | 'pedidos' | 'meta' | 'mais'
 
 interface NavigationProps {
   activeTab: TabType
@@ -52,6 +53,7 @@ export function DesktopSidebar({
 }: NavigationProps) {
   const tabs = [
     { id: 'produtos' as TabType, label: 'Catálogo', icon: Package, badge: cartCount > 0 ? cartCount : undefined },
+    { id: 'clientes' as TabType, label: 'Clientes', icon: Users },
     {
       id: 'pedidos' as TabType,
       label: 'Pedidos & Orç.',
@@ -225,6 +227,7 @@ export function MobileBottomNav({
 }) {
   const tabs = [
     { id: 'produtos' as TabType, label: 'Catálogo', icon: Package, badge: cartCount > 0 ? cartCount : undefined },
+    { id: 'clientes' as TabType, label: 'Clientes', icon: Users },
     {
       id: 'pedidos' as TabType,
       label: 'Pedidos',
@@ -237,8 +240,8 @@ export function MobileBottomNav({
   ]
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200/80 dark:border-slate-800 shadow-lg px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
-      <div className="grid grid-cols-4 gap-1 max-w-md mx-auto h-12">
+    <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200/80 dark:border-slate-800 shadow-lg px-1.5 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
+      <div className="grid grid-cols-5 gap-1 max-w-md mx-auto h-12">
         {tabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id

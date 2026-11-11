@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   X,
   UserPlus,
@@ -9,15 +9,19 @@ import {
   MapPin,
   Loader2,
   AlertCircle,
+  FileText,
+  User,
 } from 'lucide-react'
 import type { Cliente, NovoClientePayload, TabelaPreco } from '../types'
-import { criarCliente } from '../services/api'
+import { atualizarCliente, criarCliente } from '../services/api'
 
 interface NewClientModalProps {
   isOpen: boolean
   onClose: () => void
   tabelas: TabelaPreco[]
+  editingCliente?: Cliente | null
   onCreated: (cliente: Cliente) => void
+  onUpdated?: (cliente: Cliente) => void
 }
 
 function formatCpfCnpjInput(val: string): string {
@@ -47,6 +51,11 @@ function formatPhoneInput(val: string): string {
     .replace(/(\d{5})(\d)/, '$1-$2')
 }
 
+function formatCepInput(val: string): string {
+  const limpo = val.replace(/\D/g, '').slice(0, 8)
+  return limpo.length > 5 ? `${limpo.slice(0, 5)}-${limpo.slice(5)}` : limpo
+}
+
 const emptyClienteForm = (): NovoClientePayload => ({
   razao_social: '',
   nome_fantasia: '',
@@ -67,22 +76,58 @@ const emptyClienteForm = (): NovoClientePayload => ({
   observacoes: '',
 })
 
+function clienteToForm(c: Cliente): NovoClientePayload {
+  return {
+    razao_social: c.razao_social || '',
+    nome_fantasia: c.nome_fantasia || '',
+    cpf_cnpj: formatCpfCnpjInput(c.cpf_cnpj || ''),
+    inscricao_estadual: c.inscricao_estadual || '',
+    email: c.email || '',
+    telefone: c.telefone ? formatPhoneInput(c.telefone) : '',
+    celular: c.celular ? formatPhoneInput(c.celular) : '',
+    contato_nome: c.contato_nome || '',
+    cep: c.cep ? formatCepInput(c.cep) : '',
+    logradouro: c.logradouro || '',
+    numero: c.numero || '',
+    complemento: c.complemento || '',
+    bairro: c.bairro || '',
+    cidade: c.cidade || '',
+    estado: c.estado || '',
+    tabela_preco_id: c.tabela_preco_id || '',
+    observacoes: c.observacoes || '',
+  }
+}
+
 export const NewClientModal: React.FC<NewClientModalProps> = ({
   isOpen,
   onClose,
   tabelas,
+  editingCliente = null,
   onCreated,
+  onUpdated,
 }) => {
   const [clienteForm, setClienteForm] = useState<NovoClientePayload>(emptyClienteForm)
   const [salvando, setSalvando] = useState(false)
   const [buscandoCep, setBuscandoCep] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
+  const isEditing = !!editingCliente
+
+  useEffect(() => {
+    if (!isOpen) return
+    setFormError(null)
+    if (editingCliente) {
+      setClienteForm(clienteToForm(editingCliente))
+    } else {
+      setClienteForm(emptyClienteForm())
+    }
+  }, [isOpen, editingCliente])
+
   if (!isOpen) return null
 
   const handleCepChange = async (cepRaw: string) => {
     const limpo = cepRaw.replace(/\D/g, '').slice(0, 8)
-    const fmt = limpo.length > 5 ? `${limpo.slice(0, 5)}-${limpo.slice(5)}` : limpo
+    const fmt = formatCepInput(cepRaw)
     setClienteForm((prev) => ({ ...prev, cep: fmt }))
 
     if (limpo.length === 8) {
@@ -111,11 +156,11 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
     e.preventDefault()
     setFormError(null)
     const docDigits = (clienteForm.cpf_cnpj || '').replace(/\D/g, '')
-    if (!clienteForm.razao_social.trim() || !docDigits) {
+    if (!clienteForm.razao_social.trim() || (!isEditing && !docDigits)) {
       setFormError('Razão Social / Nome e CPF/CNPJ são obrigatórios.')
       return
     }
-    if (docDigits.length !== 11 && docDigits.length !== 14) {
+    if (!isEditing && docDigits.length !== 11 && docDigits.length !== 14) {
       setFormError('Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido.')
       return
     }
@@ -126,14 +171,25 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
         ...clienteForm,
         razao_social: clienteForm.razao_social.trim(),
         nome_fantasia: clienteForm.nome_fantasia?.trim() || '',
+        inscricao_estadual: clienteForm.inscricao_estadual?.trim() || '',
+        contato_nome: clienteForm.contato_nome?.trim() || '',
         tabela_preco_id: clienteForm.tabela_preco_id || undefined,
       }
-      const salvo = await criarCliente(payload)
-      setClienteForm(emptyClienteForm())
-      onCreated(salvo)
+      if (isEditing && editingCliente) {
+        const atualizado = await atualizarCliente(editingCliente.id, payload)
+        if (onUpdated) {
+          onUpdated(atualizado)
+        } else {
+          onCreated(atualizado)
+        }
+      } else {
+        const salvo = await criarCliente(payload)
+        setClienteForm(emptyClienteForm())
+        onCreated(salvo)
+      }
       onClose()
     } catch (err: any) {
-      setFormError(err?.message || 'Falha ao cadastrar cliente.')
+      setFormError(err?.message || 'Falha ao salvar cliente.')
     } finally {
       setSalvando(false)
     }
@@ -160,10 +216,12 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
             </div>
             <div className="min-w-0">
               <h2 className="font-display text-sm sm:text-base font-bold text-slate-900 dark:text-white truncate">
-                Cadastrar Novo Cliente
+                {isEditing ? 'Editar Dados do Cliente' : 'Cadastrar Novo Cliente'}
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                Vinculado automaticamente à sua carteira e ao pedido
+                {isEditing
+                  ? 'Atualiza dados fiscais, inscrição estadual e endereço no ERP'
+                  : 'Vinculado automaticamente à sua carteira e ao pedido'}
               </p>
             </div>
           </div>
@@ -192,17 +250,19 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
               </div>
             )}
 
-            <div className="rounded-xl bg-teal-50/80 dark:bg-[#00A19C]/10 border border-teal-200/80 dark:border-[#00A19C]/20 p-3 text-xs text-slate-800 dark:text-teal-200 flex items-start gap-2">
-              <Sparkles className="h-4 w-4 text-[#00A19C] shrink-0 mt-0.5" />
-              <span className="leading-relaxed">
-                Após salvar, este cliente já ficará selecionado automaticamente no seu pedido atual e será sincronizado com o ERP.
-              </span>
-            </div>
+            {!isEditing && (
+              <div className="rounded-xl bg-teal-50/80 dark:bg-[#00A19C]/10 border border-teal-200/80 dark:border-[#00A19C]/20 p-3 text-xs text-slate-800 dark:text-teal-200 flex items-start gap-2">
+                <Sparkles className="h-4 w-4 text-[#00A19C] shrink-0 mt-0.5" />
+                <span className="leading-relaxed">
+                  Após salvar, este cliente já ficará selecionado automaticamente e será sincronizado com o ERP (incluindo Inscrição Estadual para faturamento).
+                </span>
+              </div>
+            )}
 
-            {/* 1. Identificação */}
+            {/* 1. Identificação & Dados Fiscais */}
             <div className="space-y-3">
-              <h3 className="font-display font-bold text-slate-900 dark:text-white text-xs uppercase tracking-wider text-slate-500">
-                1. Identificação do Cliente
+              <h3 className="font-display font-bold text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider">
+                1. Identificação & Dados Fiscais
               </h3>
 
               <div>
@@ -233,18 +293,60 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
                   />
                 </div>
                 <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                    <User className="h-3.5 w-3.5 text-slate-400" /> Contato / Comprador
+                  </label>
+                  <input
+                    type="text"
+                    value={clienteForm.contato_nome || ''}
+                    onChange={(e) => setClienteForm({ ...clienteForm, contato_nome: e.target.value })}
+                    placeholder="Nome do comprador ou responsável"
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
                   <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
                     CPF ou CNPJ *
                   </label>
                   <input
                     type="text"
                     required
+                    disabled={isEditing}
                     inputMode="numeric"
                     value={clienteForm.cpf_cnpj}
                     onChange={(e) =>
                       setClienteForm({ ...clienteForm, cpf_cnpj: formatCpfCnpjInput(e.target.value) })
                     }
                     placeholder="00.000.000/0000-00"
+                    className={`${inputClass} font-mono tabular-nums disabled:opacity-60`}
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                      <FileText className="h-3.5 w-3.5 text-[#00A19C]" /> Inscrição Estadual
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setClienteForm({ ...clienteForm, inscricao_estadual: 'ISENTO' })}
+                      className="text-[10px] font-semibold text-[#00A19C] hover:underline"
+                    >
+                      Marcar ISENTO
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={clienteForm.inscricao_estadual || ''}
+                    onChange={(e) =>
+                      setClienteForm({
+                        ...clienteForm,
+                        inscricao_estadual: e.target.value.toUpperCase(),
+                      })
+                    }
+                    placeholder="Número IE ou ISENTO"
                     className={`${inputClass} font-mono tabular-nums`}
                   />
                 </div>
@@ -304,7 +406,7 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
             {/* 2. Endereço */}
             <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
               <div className="flex items-center justify-between">
-                <h3 className="font-display font-bold text-slate-900 dark:text-white text-xs uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <h3 className="font-display font-bold text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider flex items-center gap-1.5">
                   <MapPin className="h-3.5 w-3.5 text-[#00A19C]" /> 2. Endereço de Entrega / Faturamento
                 </h3>
                 {buscandoCep && (
@@ -394,7 +496,7 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
                   rows={2}
                   value={clienteForm.observacoes || ''}
                   onChange={(e) => setClienteForm({ ...clienteForm, observacoes: e.target.value })}
-                  placeholder="Horário de recebimento, referências, inscrição estadual…"
+                  placeholder="Horário de recebimento, referências comerciais…"
                   className={inputClass}
                 />
               </div>
@@ -417,7 +519,7 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
               className="flex-[2] flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#00A19C] hover:bg-[#008C87] text-white font-semibold text-xs shadow-sm disabled:opacity-50"
             >
               {salvando && <Loader2 className="h-4 w-4 animate-spin" />}
-              <span>Salvar & Selecionar Cliente</span>
+              <span>{isEditing ? 'Salvar Alterações no ERP' : 'Salvar & Selecionar Cliente'}</span>
             </button>
           </div>
         </form>
