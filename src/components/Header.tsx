@@ -3,6 +3,7 @@ import {
   ShoppingCart,
   Search,
   X,
+  Wifi,
   WifiOff,
   Building2,
   User,
@@ -17,6 +18,7 @@ import {
   Sun,
   Moon,
   RefreshCw,
+  Download,
 } from 'lucide-react'
 import { AppLogo } from './AppLogo'
 import type { Categoria, Cliente, TabelaPreco } from '../types'
@@ -53,6 +55,9 @@ interface HeaderProps {
   onOpenOrcamentos?: () => void
   theme?: ThemeMode
   onToggleTheme?: () => void
+  canInstallApp?: boolean
+  onInstallApp?: () => void
+  onDismissInstall?: () => void
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -85,6 +90,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenOrcamentos,
   theme = 'light',
   onToggleTheme,
+  canInstallApp = false,
+  onInstallApp,
+  onDismissInstall,
 }) => {
   const totalFmt = cartTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
   const catScrollRef = useRef<HTMLDivElement>(null)
@@ -177,9 +185,39 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
             </div>
-            <p className="truncate text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+            <p className="truncate text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
               <User className="h-3 w-3 shrink-0 text-[#00A19C]" />
               <span className="truncate">{vendedorNome || 'Representante Comercial'}</span>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold border shrink-0 ${
+                  syncingOffline
+                    ? 'bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-500/20'
+                    : isOffline
+                    ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/20'
+                    : 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/20'
+                }`}
+                title={
+                  syncingOffline
+                    ? 'Sincronizando dados e fila offline'
+                    : isOffline
+                    ? 'Sem conexão — operando com cache local'
+                    : 'Conectado ao servidor em tempo real'
+                }
+              >
+                {syncingOffline ? (
+                  <RefreshCw className="h-2.5 w-2.5 animate-spin" />
+                ) : isOffline ? (
+                  <WifiOff className="h-2.5 w-2.5" />
+                ) : (
+                  <Wifi className="h-2.5 w-2.5" />
+                )}
+                <span>{syncingOffline ? 'Sincronizando' : isOffline ? 'Offline' : 'Online'}</span>
+                {pendingOfflineCount > 0 && (
+                  <span className="font-mono tabular-nums rounded-full bg-current/15 px-1">
+                    {pendingOfflineCount}
+                  </span>
+                )}
+              </span>
             </p>
           </div>
         </div>
@@ -441,19 +479,55 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
+      {/* Banner sutil de instalação PWA */}
+      {canInstallApp && onInstallApp && (
+        <div className="flex items-center justify-between gap-2 bg-[#00A19C]/10 dark:bg-[#00A19C]/15 border-t border-[#00A19C]/20 px-3 py-1.5 sm:px-6 text-[11px]">
+          <div className="flex items-center gap-2 min-w-0">
+            <Download className="h-3.5 w-3.5 text-[#00A19C] shrink-0" />
+            <span className="font-medium text-slate-700 dark:text-slate-200 truncate">
+              Instale o ThothVendas no aparelho para acesso rápido e vendas offline.
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={onInstallApp}
+              className="rounded-lg bg-[#00A19C] px-2.5 py-1 text-[10px] font-bold text-white hover:bg-[#008C87] transition-colors"
+            >
+              Instalar App
+            </button>
+            {onDismissInstall && (
+              <button
+                type="button"
+                onClick={onDismissInstall}
+                className="rounded-lg p-1 text-slate-500 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-slate-700/60"
+                aria-label="Dispensar aviso de instalação"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Aviso de Offline */}
       {isOffline && (
         <div className="flex items-center justify-center gap-1.5 bg-amber-50 dark:bg-amber-500/15 border-t border-amber-200 dark:border-amber-500/20 px-3 py-1.5 text-center text-[11px] font-semibold text-amber-800 dark:text-amber-300">
           <WifiOff className="h-3.5 w-3.5 shrink-0" />
-          <span>Modo Offline — Catálogo, Orçamentos e Pedidos salvos localmente.</span>
+          <span>
+            Modo Offline — Catálogo, Orçamentos e Pedidos salvos localmente
+            {pendingOfflineCount > 0 ? ` (${pendingOfflineCount} na fila)` : ''}.
+          </span>
         </div>
       )}
 
-      {/* Aviso de Fila Pendente quando Online */}
-      {!isOffline && pendingOfflineCount > 0 && (
+      {/* Aviso de Fila Pendente / Sincronização quando Online */}
+      {!isOffline && (pendingOfflineCount > 0 || syncingOffline) && (
         <div className="flex items-center justify-center gap-2 bg-teal-50 dark:bg-[#00A19C]/15 border-t border-teal-200 dark:border-[#00A19C]/30 px-3 py-1.5 text-[11px] font-semibold text-teal-800 dark:text-teal-300">
           <span className="font-mono tabular-nums">
-            {pendingOfflineCount} pedido(s) offline aguardando transmissão.
+            {syncingOffline
+              ? `Sincronizando ${pendingOfflineCount > 0 ? `${pendingOfflineCount} pedido(s) offline` : 'dados com o servidor'}…`
+              : `${pendingOfflineCount} pedido(s) offline aguardando transmissão.`}
           </span>
           {onSyncOffline && (
             <button

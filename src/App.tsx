@@ -9,7 +9,10 @@ import { PedidosView } from './components/PedidosView'
 import { MetaView } from './components/MetaView'
 import { MaisView } from './components/MaisView'
 import { useTheme } from './hooks/useTheme'
+import { usePwaInstall } from './hooks/usePwaInstall'
 import {
+  AuthError,
+  checkServerConnectivity,
   getProdutos,
   getCategorias,
   getTabelasPreco,
@@ -49,10 +52,14 @@ import {
   Bookmark,
   Edit3,
   AlertCircle,
+  Share,
+  PlusSquare,
+  Smartphone,
 } from 'lucide-react'
 
 export function App() {
   const { theme, toggleTheme } = useTheme()
+  const pwaInstall = usePwaInstall()
 
   // Autenticação & Sessão
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!getToken())
@@ -80,9 +87,15 @@ export function App() {
   const [orcamentosSalvos, setOrcamentosSalvos] = useState<OrcamentoSalvo[]>(() => getOrcamentosLocais())
   const [pendingOfflineOrders, setPendingOfflineOrders] = useState<PendingOfflineOrder[]>([])
   const [syncingOffline, setSyncingOffline] = useState(false)
+  const [syncVersion, setSyncVersion] = useState(0)
   const [loading, setLoading] = useState(true)
   const [fromCache, setFromCache] = useState(false)
   const [isOffline, setIsOffline] = useState(!navigator.onLine)
+  const syncLockRef = useRef(false)
+  const lastSyncAtRef = useRef(0)
+  const isOfflineRef = useRef(isOffline)
+  const fromCacheRef = useRef(fromCache)
+  const pendingCountRef = useRef(0)
 
   // Filtros e Visualização de Catálogo
   const [search, setSearch] = useState('')
@@ -120,31 +133,124 @@ export function App() {
     setTimeout(() => setToastMessage(null), 3000)
   }, [])
 
-  const refreshOrcamentos = useCallback(() => {
-    setOrcamentosSalvos(getOrcamentosLocais())
-  }, [])
-
   const refreshPendingOffline = useCallback(async () => {
     const q = await getPendingOfflineOrders()
     setPendingOfflineOrders(q)
   }, [])
 
+  const refreshOrcamentos = useCallback(() => {
+    setOrcamentosSalvos(getOrcamentosLocais())
+    void refreshPendingOffline()
+  }, [refreshPendingOffline])
+
+  useEffect(() => {
+    isOfflineRef.current = isOffline
+  }, [isOffline])
+
+  useEffect(() => {
+    fromCacheRef.current = fromCache
+  }, [fromCache])
+
+  useEffect(() => {
+    pendingCountRef.current = pendingOfflineOrders.length
+  }, [pendingOfflineOrders.length])
+
+  const carregarDados = useCallback(
+    async (options?: { forceNetwork?: boolean; silent?: boolean }) => {
+      if (!getToken()) {
+        setIsAuthenticated(false)
+        setLoading(false)
+        return
+      }
+
+      if (!options?.silent) {
+        setLoading(true)
+        setErrorBanner(null)
+      }
+      try {
+        const [prodData, cats, tabs, conds, clis, me] = await Promise.all([
+          getProdutos(),
+          getCategorias(),
+          getTabelasPreco(),
+          getCondicoesPagamento(),
+          getClientes(),
+          getMe(),
+        ])
+        setProdutos(prodData.produtos)
+        setFromCache(prodData.fromCache)
+        setIsOffline(!navigator.onLine || prodData.fromCache)
+        if (!prodData.fromCache) {
+          lastSyncAtRef.current = Date.now()
+          setSyncVersion((v) => v + 1)
+        }
+        setCategorias(cats)
+        setTabelas(tabs)
+        setFormasPagamento(conds.formas)
+        setPrazosPagamento(conds.prazos)
+        if (tabs.length > 0 && !selectedTabelaRef.current) {
+          const padrao = tabs.find((t) => t.padrao) || tabs[0]
+          setSelectedTabelaId(padrao.id)
+        }
+        setClientes(clis)
+        setOrcamentosSalvos(getOrcamentosLocais())
+        await refreshPendingOffline()
+
+        if (me) {
+          setIsAuthenticated(true)
+          if (me.user) setCurrentUser(me.user)
+          if (me.empresaAtiva) {
+            setEmpresaAtiva(me.empresaAtiva)
+            setEmpresaNome(me.empresaAtiva.nome_fantasia || me.empresaAtiva.razao_social || 'ThothVendas')
+          }
+          if (me.empresas && Array.isArray(me.empresas)) {
+            setEmpresasDisponiveis(me.empresas)
+          }
+        }
+      } catch (err: any) {
+        console.warn('Falha ao carregar dados:', err)
+        if (
+          err instanceof AuthError ||
+          err?.status === 401 ||
+          (err?.message && (err.message.includes('401') || err.message.includes('Sessão expirada')))
+        ) {
+          setIsAuthenticated(false)
+        } else if (!options?.silent) {
+          setErrorBanner(err?.message || 'Falha ao carregar dados do catálogo.')
+        }
+      } finally {
+        if (!options?.silent) {
+          setLoading(false)
+        }
+      }
+    },
+    [refreshPendingOffline]
+  )
+
   const handleSyncOffline = useCallback(async () => {
-    if (!navigator.onLine || syncingOffline) return
+    if (!navigator.onLine || syncLockRef.current) return
+    syncLockRef.current = true
     setSyncingOffline(true)
     try {
       const result = await syncPendingOfflineOrders()
       setPendingOfflineOrders(result.remaining)
+      setOrcamentosSalvos(getOrcamentosLocais())
+
+      if (result.authExpired) {
+        setIsAuthenticated(false)
+        return
+      }
       if (result.synced > 0) {
         showToast(`${result.synced} pedido(s) offline sincronizado(s) com o ERP!`)
       }
       if (result.failed > 0) {
         setErrorBanner(`${result.failed} pedido(s) offline falharam ao sincronizar. Verifique em Pedidos.`)
       }
+      await carregarDados({ forceNetwork: true, silent: true })
     } finally {
+      syncLockRef.current = false
       setSyncingOffline(false)
     }
-  }, [syncingOffline, showToast])
+  }, [carregarDados, showToast])
 
   useEffect(() => {
     selectedTabelaRef.current = selectedTabelaId
@@ -168,74 +274,60 @@ export function App() {
   useEffect(() => {
     const handleOnline = () => {
       setIsOffline(false)
-      handleSyncOffline()
+      if (!getToken()) return
+      if (pendingCountRef.current > 0) {
+        void handleSyncOffline()
+      } else {
+        void carregarDados({ forceNetwork: true, silent: true })
+      }
     }
     const handleOffline = () => setIsOffline(true)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible' || !navigator.onLine || !getToken()) return
+      if (pendingCountRef.current > 0) {
+        void handleSyncOffline()
+      } else if (
+        isOfflineRef.current ||
+        fromCacheRef.current ||
+        Date.now() - lastSyncAtRef.current > 30000
+      ) {
+        void carregarDados({ forceNetwork: true, silent: true })
+      }
+    }
+
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [handleSyncOffline])
+  }, [handleSyncOffline, carregarDados])
 
-  const carregarDados = useCallback(async () => {
-    if (!getToken()) {
-      setIsAuthenticated(false)
-      setLoading(false)
-      return
-    }
+  // Verificação periódica de conectividade apenas quando há fila offline ou cache ativo
+  useEffect(() => {
+    if (!isAuthenticated) return
+    if (pendingOfflineOrders.length === 0 && !isOffline && !fromCache) return
 
-    setLoading(true)
-    setErrorBanner(null)
-    try {
-      const [prodData, cats, tabs, conds, clis, me] = await Promise.all([
-        getProdutos(),
-        getCategorias(),
-        getTabelasPreco(),
-        getCondicoesPagamento(),
-        getClientes(),
-        getMe(),
-      ])
-      setProdutos(prodData.produtos)
-      setFromCache(prodData.fromCache)
-      setCategorias(cats)
-      setTabelas(tabs)
-      setFormasPagamento(conds.formas)
-      setPrazosPagamento(conds.prazos)
-      if (tabs.length > 0 && !selectedTabelaRef.current) {
-        const padrao = tabs.find((t) => t.padrao) || tabs[0]
-        setSelectedTabelaId(padrao.id)
-      }
-      setClientes(clis)
-      refreshOrcamentos()
-      await refreshPendingOffline()
+    const intervalId = window.setInterval(async () => {
+      if (!navigator.onLine || !getToken() || syncLockRef.current) return
+      const reachable = await checkServerConnectivity()
+      if (!reachable) return
 
-      if (me) {
-        setIsAuthenticated(true)
-        if (me.user) setCurrentUser(me.user)
-        if (me.empresaAtiva) {
-          setEmpresaAtiva(me.empresaAtiva)
-          setEmpresaNome(me.empresaAtiva.nome_fantasia || me.empresaAtiva.razao_social || 'ThothVendas')
-        }
-        if (me.empresas && Array.isArray(me.empresas)) {
-          setEmpresasDisponiveis(me.empresas)
-        }
+      setIsOffline(false)
+      if (pendingCountRef.current > 0) {
+        await handleSyncOffline()
+      } else if (fromCacheRef.current || isOfflineRef.current) {
+        await carregarDados({ forceNetwork: true, silent: true })
       }
-    } catch (err: any) {
-      console.warn('Falha ao carregar dados:', err)
-      if (err.message && (err.message.includes('401') || err.message.includes('Sessão expirada'))) {
-        setIsAuthenticated(false)
-      } else {
-        setErrorBanner(err.message || 'Falha ao carregar dados do catálogo.')
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [refreshOrcamentos, refreshPendingOffline])
+    }, 15000)
+
+    return () => window.clearInterval(intervalId)
+  }, [isAuthenticated, pendingOfflineOrders.length, isOffline, fromCache, handleSyncOffline, carregarDados])
 
   useEffect(() => {
-    carregarDados()
+    carregarDados({ forceNetwork: true })
   }, [carregarDados])
 
   const handleAuthSuccess = (empresa: EmpresaVinculo, user: UsuarioVendedor, empresas: EmpresaVinculo[]) => {
@@ -244,7 +336,11 @@ export function App() {
     setCurrentUser(user)
     setEmpresasDisponiveis(empresas)
     setEmpresaNome(empresa.nome_fantasia || empresa.razao_social || 'ThothVendas')
-    carregarDados()
+    void carregarDados({ forceNetwork: true }).then(() => {
+      if (pendingCountRef.current > 0 && navigator.onLine) {
+        void handleSyncOffline()
+      }
+    })
   }
 
   const handleTrocarEmpresa = async (empresa: EmpresaVinculo) => {
@@ -258,9 +354,11 @@ export function App() {
       setSwitchModalOpen(false)
       setItens([])
       setSelectedCliente(null)
+      setProdutos([])
+      setClientes([])
       selectedTabelaRef.current = ''
       setSelectedTabelaId('')
-      await carregarDados()
+      await carregarDados({ forceNetwork: true })
       showToast(`Empresa alterada para ${empresa.nome_fantasia || empresa.razao_social}`)
     } catch (err: any) {
       setErrorBanner(`Erro ao alternar de empresa: ${err.message || err}`)
@@ -396,6 +494,7 @@ export function App() {
     if (itens.length === 0) return
     try {
       const orc = await salvarOrcamento({
+        empresaId: activeEmpresaId,
         cliente: selectedCliente,
         tabelaPrecoId: selectedTabelaId || itens[0]?.tabelaPrecoId,
         formaPagamentoId,
@@ -408,7 +507,11 @@ export function App() {
       refreshOrcamentos()
       setItens([])
       setCartOpen(false)
-      showToast(`Orçamento ${orc.numero} salvo com sucesso!`)
+      showToast(
+        orc.pendingLocalId
+          ? `Orçamento ${orc.numero} salvo offline e será sincronizado ao reconectar!`
+          : `Orçamento ${orc.numero} salvo com sucesso!`
+      )
     } catch (err: any) {
       setErrorBanner(`Erro ao salvar orçamento: ${err.message || err}`)
     }
@@ -438,14 +541,29 @@ export function App() {
     if (!selectedCliente) return
     setIsSubmitting(true)
     try {
+      const brutoTotal = itens.reduce((acc, it) => acc + it.quantidade * it.precoUnitarioCobrado, 0)
+      const descontoValor = Number(
+        itens
+          .reduce(
+            (acc, it) => acc + it.quantidade * it.precoUnitarioCobrado * ((it.descontoPct || 0) / 100),
+            0
+          )
+          .toFixed(2)
+      )
+      const descontoPercentual =
+        brutoTotal > 0 ? Number(((descontoValor / brutoTotal) * 100).toFixed(2)) : 0
+
       const payload = {
         clienteId: selectedCliente.id,
+        empresaId: activeEmpresaId,
         tabelaPrecoId: selectedTabelaId || itens[0]?.tabelaPrecoId,
         formaPagamentoId,
         prazoPagamentoId,
         formaPagamento,
         condicaoPagamento: condicao,
         status: 'pendente' as const,
+        descontoValor,
+        descontoPercentual,
         observacoes: observacoes.trim() || undefined,
         itens: itens.map((it) => ({
           produtoId: it.produtoId,
@@ -455,8 +573,11 @@ export function App() {
         })),
       }
       const res = await enviarPedido(payload, {
+        empresaId: activeEmpresaId,
         clienteNome: selectedCliente.nome_fantasia || selectedCliente.razao_social,
         totalEstimado: cartTotal,
+        descontoValor,
+        descontoPercentual,
         permitirOffline: empresaAtiva?.permitir_pedido_offline ?? true,
         itensResumo: itens.map((it) => ({
           nome: it.nome,
@@ -472,6 +593,7 @@ export function App() {
         showToast('Pedido gravado na fila offline e será enviado ao reconectar!')
       } else {
         showToast('Pedido emitido e transmitido ao ERP!')
+        void carregarDados({ forceNetwork: true, silent: true })
       }
       setItens([])
       setCartOpen(false)
@@ -602,6 +724,11 @@ export function App() {
               }}
               theme={theme}
               onToggleTheme={toggleTheme}
+              canInstallApp={pwaInstall.showBanner}
+              onInstallApp={() => {
+                void pwaInstall.promptInstall()
+              }}
+              onDismissInstall={pwaInstall.dismissBanner}
             />
 
             <main className="mx-auto max-w-6xl w-full px-3 py-3 sm:px-6 sm:py-5 flex-1">
@@ -737,6 +864,8 @@ export function App() {
             orcamentosLocais={orcamentosSalvos}
             pendingOfflineOrders={pendingOfflineOrders}
             syncingOffline={syncingOffline}
+            isOffline={isOffline}
+            syncVersion={syncVersion}
             onSyncOffline={handleSyncOffline}
             onRemoveOfflineOrder={async (localId) => {
               await removePendingOfflineOrder(localId)
@@ -750,7 +879,7 @@ export function App() {
         )}
 
         {/* ABA: META */}
-        {activeTab === 'meta' && <MetaView vendedorNome={currentUser?.nome} />}
+        {activeTab === 'meta' && <MetaView vendedorNome={currentUser?.nome} syncVersion={syncVersion} />}
 
         {/* ABA: AJUSTES */}
         {activeTab === 'mais' && (
@@ -773,11 +902,17 @@ export function App() {
             empresasCount={empresasDisponiveis.length}
             onSwitchEmpresa={() => setSwitchModalOpen(true)}
             onLogout={() => setLogoutModalOpen(true)}
-            onReloadData={carregarDados}
+            onReloadData={() => carregarDados({ forceNetwork: true })}
             autoOpenNewClient={autoOpenNewClient}
             onClearAutoOpenNewClient={() => setAutoOpenNewClient(false)}
             theme={theme}
             onToggleTheme={toggleTheme}
+            isOffline={isOffline}
+            canInstallApp={pwaInstall.canInstall}
+            isAppInstalled={pwaInstall.isStandalone}
+            onInstallApp={() => {
+              void pwaInstall.promptInstall()
+            }}
           />
         )}
       </div>
@@ -915,6 +1050,65 @@ export function App() {
                 Sair
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Instruções de Instalação iOS Safari */}
+      {pwaInstall.iosGuideOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200/80 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <Smartphone className="h-5 w-5 text-[#00A19C]" />
+                <h3 className="font-display font-bold text-sm text-slate-900 dark:text-white">
+                  Instalar no iPhone / iPad
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => pwaInstall.setIosGuideOpen(false)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label="Fechar"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <ol className="space-y-3 text-xs text-slate-600 dark:text-slate-300">
+              <li className="flex items-start gap-2.5">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#00A19C]/10 font-bold text-[#00A19C]">
+                  1
+                </span>
+                <span>
+                  Toque no botão <strong className="inline-flex items-center gap-1 text-slate-900 dark:text-white"><Share className="h-3.5 w-3.5 text-[#00A19C]" /> Compartilhar</strong> na barra inferior do Safari.
+                </span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#00A19C]/10 font-bold text-[#00A19C]">
+                  2
+                </span>
+                <span>
+                  Role as opções e selecione <strong className="inline-flex items-center gap-1 text-slate-900 dark:text-white"><PlusSquare className="h-3.5 w-3.5 text-[#00A19C]" /> Adicionar à Tela de Início</strong>.
+                </span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#00A19C]/10 font-bold text-[#00A19C]">
+                  3
+                </span>
+                <span>
+                  Confirme tocando em <strong className="text-slate-900 dark:text-white">Adicionar</strong> para usar em tela cheia e modo offline.
+                </span>
+              </li>
+            </ol>
+
+            <button
+              type="button"
+              onClick={() => pwaInstall.setIosGuideOpen(false)}
+              className="w-full rounded-xl bg-[#00A19C] hover:bg-[#008C87] py-2.5 text-xs font-semibold text-white"
+            >
+              Entendi
+            </button>
           </div>
         </div>
       )}

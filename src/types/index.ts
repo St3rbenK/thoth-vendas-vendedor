@@ -75,6 +75,8 @@ export interface OrcamentoSalvo {
   id: string
   numero: string
   pedidoId?: string
+  pendingLocalId?: string
+  empresaId?: string
   cliente: Cliente | null
   tabelaPrecoId?: string
   formaPagamentoId?: string
@@ -188,6 +190,7 @@ export interface Pedido {
 
 export interface CriarPedidoPayload {
   clienteId: string
+  empresaId?: string
   tabelaPrecoId?: string
   formaPagamentoId?: string
   prazoPagamentoId?: string
@@ -195,6 +198,8 @@ export interface CriarPedidoPayload {
   formaPagamento?: string
   status?: 'pendente' | 'orcamento'
   descontoGeralValor?: number
+  descontoValor?: number
+  descontoPercentual?: number
   observacoes?: string
   itens: {
     produtoId: string
@@ -207,9 +212,12 @@ export interface CriarPedidoPayload {
 
 export interface PendingOfflineOrder {
   localId: string
+  empresaId?: string
   clienteNome: string
   condicaoPagamento: string
   formaPagamento?: string
+  descontoValor?: number
+  descontoPercentual?: number
   totalEstimado: number
   itensResumo: { nome: string; codigo: string; unidade: string; quantidade: number; precoUnitario: number; descontoPct: number }[]
   queuedAt: string

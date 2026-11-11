@@ -26,6 +26,8 @@ import {
   Sun,
   Moon,
   Tag,
+  Download,
+  Smartphone,
 } from 'lucide-react'
 import { criarCliente, updateVendedorPerfil } from '../services/api'
 import { AppLogo } from './AppLogo'
@@ -48,6 +50,10 @@ interface MaisViewProps {
   onClearAutoOpenNewClient?: () => void
   theme: ThemeMode
   onToggleTheme: () => void
+  isOffline?: boolean
+  canInstallApp?: boolean
+  isAppInstalled?: boolean
+  onInstallApp?: () => void
 }
 
 type SettingsScreen = 'menu' | 'clientes' | 'novo_cliente' | 'perfil' | 'alcada'
@@ -90,6 +96,10 @@ export function MaisView({
   onClearAutoOpenNewClient,
   theme,
   onToggleTheme,
+  isOffline = false,
+  canInstallApp = false,
+  isAppInstalled = false,
+  onInstallApp,
 }: MaisViewProps) {
   const [screen, setScreen] = useState<SettingsScreen>(autoOpenNewClient ? 'novo_cliente' : 'menu')
   const [clienteSearch, setClienteSearch] = useState('')
@@ -385,8 +395,10 @@ export function MaisView({
                     {initials}
                   </div>
                   <span
-                    className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900"
-                    title="Online"
+                    className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full ring-2 ring-white dark:ring-slate-900 ${
+                      isOffline ? 'bg-amber-500' : 'bg-emerald-500'
+                    }`}
+                    title={isOffline ? 'Modo Offline' : 'Online'}
                   />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -616,6 +628,44 @@ export function MaisView({
                       </div>
                     </div>
                     <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
+                  </button>
+                )}
+
+                {(canInstallApp || isAppInstalled) && (
+                  <button
+                    type="button"
+                    disabled={isAppInstalled}
+                    onClick={onInstallApp}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50 transition disabled:opacity-80 disabled:cursor-default"
+                  >
+                    <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-teal-500/10 text-[#00A19C]">
+                        {isAppInstalled ? (
+                          <Smartphone className="h-5 w-5" />
+                        ) : (
+                          <Download className="h-5 w-5" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                          {isAppInstalled ? 'Aplicativo Instalado' : 'Instalar App no Aparelho'}
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                          {isAppInstalled
+                            ? 'Executando como aplicativo nativo (PWA)'
+                            : 'Adicionar ícone na tela inicial para acesso rápido e offline'}
+                        </p>
+                      </div>
+                    </div>
+                    {isAppInstalled ? (
+                      <span className="rounded-full bg-emerald-50 dark:bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
+                        Ativo
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-[#00A19C] px-2.5 py-0.5 text-[10px] font-semibold text-white shrink-0">
+                        Instalar
+                      </span>
+                    )}
                   </button>
                 )}
               </div>

@@ -14,7 +14,13 @@ import { getVendedorMeta } from '../services/api'
 import { AppLogo } from './AppLogo'
 import type { VendedorMeta } from '../types'
 
-export function MetaView({ vendedorNome }: { vendedorNome?: string }) {
+export function MetaView({
+  vendedorNome,
+  syncVersion = 0,
+}: {
+  vendedorNome?: string
+  syncVersion?: number
+}) {
   const [meta, setMeta] = useState<VendedorMeta | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -32,7 +38,7 @@ export function MetaView({ vendedorNome }: { vendedorNome?: string }) {
 
   useEffect(() => {
     load()
-  }, [load])
+  }, [load, syncVersion])
 
   const metaMensal = meta?.meta_mensal || 0
   const totalVendido = meta?.total_vendido || 0

@@ -43,6 +43,8 @@ interface PedidosViewProps {
   orcamentosLocais: OrcamentoSalvo[]
   pendingOfflineOrders: PendingOfflineOrder[]
   syncingOffline?: boolean
+  isOffline?: boolean
+  syncVersion?: number
   onSyncOffline: () => Promise<void>
   onRemoveOfflineOrder: (localId: string) => Promise<void>
   onRefreshOrcamentos: () => void
@@ -56,6 +58,8 @@ export function PedidosView({
   orcamentosLocais,
   pendingOfflineOrders,
   syncingOffline = false,
+  isOffline = false,
+  syncVersion = 0,
   onSyncOffline,
   onRemoveOfflineOrder,
   onRefreshOrcamentos,
@@ -99,7 +103,7 @@ export function PedidosView({
 
   useEffect(() => {
     carregarPedidos(statusFilter)
-  }, [statusFilter, carregarPedidos])
+  }, [statusFilter, syncVersion, carregarPedidos])
 
   const handleOpenDetalhes = async (pedido: Pedido) => {
     setSelectedPedido(pedido)
@@ -129,21 +133,55 @@ export function PedidosView({
         if (orc.pedidoId) {
           await converterOrcamentoNoServidor(orc.pedidoId)
         } else {
-          await enviarPedido({
-            clienteId: orc.cliente!.id,
-            tabelaPrecoId: orc.tabelaPrecoId,
-            formaPagamento: orc.formaPagamento,
-            condicaoPagamento: orc.condicaoPagamento,
-            status: 'pendente',
-            observacoes: orc.observacoes?.trim() || undefined,
-            itens: orc.itens.map((it) => ({
-              produtoId: it.produtoId,
-              quantidade: it.quantidade,
-              precoUnitario: it.precoUnitarioCobrado,
-              descontoPct: it.descontoPct || 0,
-            })),
-          })
+          const descPct =
+            orc.subtotal > 0
+              ? Number(((orc.descontoTotal / orc.subtotal) * 100).toFixed(2))
+              : 0
+          const res = await enviarPedido(
+            {
+              clienteId: orc.cliente!.id,
+              empresaId: orc.empresaId,
+              tabelaPrecoId: orc.tabelaPrecoId,
+              formaPagamentoId: orc.formaPagamentoId,
+              prazoPagamentoId: orc.prazoPagamentoId,
+              formaPagamento: orc.formaPagamento,
+              condicaoPagamento: orc.condicaoPagamento,
+              status: 'pendente',
+              descontoValor: Number(orc.descontoTotal.toFixed(2)),
+              descontoPercentual: descPct,
+              observacoes: orc.observacoes?.trim() || undefined,
+              itens: orc.itens.map((it) => ({
+                produtoId: it.produtoId,
+                quantidade: it.quantidade,
+                precoUnitario: it.precoUnitarioCobrado,
+                descontoPct: it.descontoPct || 0,
+              })),
+            },
+            {
+              empresaId: orc.empresaId,
+              clienteNome: orc.cliente?.nome_fantasia || orc.cliente?.razao_social,
+              totalEstimado: orc.valorTotal,
+              descontoValor: Number(orc.descontoTotal.toFixed(2)),
+              descontoPercentual: descPct,
+              itensResumo: orc.itens.map((it) => ({
+                nome: it.nome,
+                codigo: it.codigo,
+                unidade: it.unidade,
+                quantidade: it.quantidade,
+                precoUnitario: it.precoUnitarioCobrado,
+                descontoPct: it.descontoPct || 0,
+              })),
+            }
+          )
           await removerOrcamento(orc.id, orc.pedidoId)
+          onRefreshOrcamentos()
+          await carregarPedidos(statusFilter)
+          onNotify?.(
+            res?.offlineQueued
+              ? 'Orçamento convertido e gravado na fila offline para envio ao reconectar!'
+              : 'Orçamento convertido em Pedido e transmitido ao ERP!'
+          )
+          return
         }
         onRefreshOrcamentos()
         await carregarPedidos(statusFilter)
@@ -397,7 +435,7 @@ export function PedidosView({
 
               <button
                 type="button"
-                disabled={syncingOffline || !navigator.onLine}
+                disabled={syncingOffline || isOffline || !navigator.onLine}
                 onClick={onSyncOffline}
                 className="inline-flex items-center gap-1.5 rounded-xl bg-[#00A19C] hover:bg-[#008C87] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
               >

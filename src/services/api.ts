@@ -1,4 +1,4 @@
-import { get, set } from 'idb-keyval'
+import { del, get, set } from 'idb-keyval'
 import type {
   Produto,
   Categoria,
@@ -25,6 +25,49 @@ export const API_URLS: string[] = [
 
 let activeApiIndex = 0
 
+export class AuthError extends Error {
+  readonly status = 401
+  constructor(message = 'Sessão expirada. Faça login com seu CPF e PIN.') {
+    super(message)
+    this.name = 'AuthError'
+  }
+}
+
+export class HttpError extends Error {
+  readonly status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'HttpError'
+    this.status = status
+  }
+}
+
+export class NetworkError extends Error {
+  constructor(message = 'Sem conexão com o servidor de vendas.') {
+    super(message)
+    this.name = 'NetworkError'
+  }
+}
+
+export function isNetworkOfflineError(err: unknown): boolean {
+  if (err instanceof AuthError) return false
+  if (err instanceof HttpError) {
+    return err.status >= 502 && err.status <= 504
+  }
+  if (err instanceof NetworkError) return true
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return true
+  if (err instanceof TypeError) return true
+  const msg = String((err as { message?: string })?.message || '').toLowerCase()
+  return (
+    msg.includes('sem conexão') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('networkerror') ||
+    msg.includes('network request failed') ||
+    msg.includes('load failed') ||
+    msg.includes('aborted')
+  )
+}
+
 export function getApiBase(): string {
   return API_URLS[activeApiIndex] || API_URLS[0]
 }
@@ -35,14 +78,93 @@ async function fetchFromApi(endpoint: string, init: RequestInit): Promise<Respon
     const idx = (activeApiIndex + i) % API_URLS.length
     const base = API_URLS[idx]
     try {
-      const res = await fetch(`${base}${endpoint}`, init)
+      const res = await fetch(`${base}${endpoint}`, {
+        ...init,
+        cache: init.cache ?? 'no-store',
+      })
+      if (res.status >= 502 && res.status <= 504 && i < API_URLS.length - 1) {
+        lastErr = new HttpError(res.status, `Gateway HTTP ${res.status}`)
+        continue
+      }
       activeApiIndex = idx
       return res
     } catch (err) {
       lastErr = err
     }
   }
-  throw lastErr || new Error('Sem conexão com o servidor de vendas.')
+  if (lastErr instanceof HttpError) {
+    throw lastErr
+  }
+  throw new NetworkError(
+    lastErr instanceof Error ? lastErr.message : 'Sem conexão com o servidor de vendas.'
+  )
+}
+
+export async function checkServerConnectivity(timeoutMs = 4000): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return false
+  }
+  for (let i = 0; i < API_URLS.length; i++) {
+    const idx = (activeApiIndex + i) % API_URLS.length
+    const base = API_URLS[idx]
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const res = await fetch(`${base}/health`, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      if (res.ok) {
+        activeApiIndex = idx
+        return true
+      }
+    } catch {
+      // tenta próximo endpoint
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  return false
+}
+
+const ACTIVE_EMPRESA_STORAGE_KEY = 'thoth_vendas_empresa_id'
+
+export function getActiveEmpresaId(): string | undefined {
+  try {
+    return localStorage.getItem(ACTIVE_EMPRESA_STORAGE_KEY) || undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function setActiveEmpresaId(empresaId?: string | null) {
+  try {
+    if (empresaId) {
+      localStorage.setItem(ACTIVE_EMPRESA_STORAGE_KEY, empresaId)
+    } else {
+      localStorage.removeItem(ACTIVE_EMPRESA_STORAGE_KEY)
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+const OFFLINE_CACHE_KEYS = [
+  'offline_produtos',
+  'offline_produtos_time',
+  'offline_categorias',
+  'offline_tabelas',
+  'offline_formas_pagamento',
+  'offline_prazos_pagamento',
+  'offline_clientes',
+  'offline_pedidos',
+  'offline_vendedor_meta',
+  'offline_me',
+]
+
+export async function clearOfflineDataCache(): Promise<void> {
+  await Promise.all(OFFLINE_CACHE_KEYS.map((key) => del(key).catch(() => undefined)))
 }
 
 export function getToken(): string | null {
@@ -74,17 +196,18 @@ export async function fetchWithAuth(endpoint: string, options: RequestInit = {})
   const res = await fetchFromApi(endpoint, {
     ...options,
     headers,
+    cache: 'no-store',
     credentials: 'include',
   })
 
   if (res.status === 401) {
     clearToken()
-    throw new Error('Sessão expirada. Faça login com seu CPF e PIN.')
+    throw new AuthError('Sessão expirada. Faça login com seu CPF e PIN.')
   }
 
   if (!res.ok) {
     const errorBody = await res.json().catch(() => ({}))
-    throw new Error(errorBody.error || `Erro HTTP ${res.status}`)
+    throw new HttpError(res.status, errorBody.error || `Erro HTTP ${res.status}`)
   }
 
   if (res.status === 204) {
@@ -110,6 +233,7 @@ export async function loginVendedor(cpf: string, pin: string): Promise<LoginResp
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cpf, pin }),
+    cache: 'no-store',
     credentials: 'include',
   })
 
@@ -118,8 +242,14 @@ export async function loginVendedor(cpf: string, pin: string): Promise<LoginResp
     throw new Error(data.error || 'Falha ao autenticar. Verifique o CPF e o PIN.')
   }
 
+  await clearOfflineDataCache()
+
   if (data.token && !data.requerSelecaoEmpresa) {
     setToken(data.token)
+  }
+  const empresaId = data.empresaAtiva?.empresa_id || data.empresaAtiva?.id
+  if (empresaId) {
+    setActiveEmpresaId(empresaId)
   }
 
   return data
@@ -134,6 +264,7 @@ export async function selecionarEmpresa(empresaId: string, tempToken?: string): 
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({ empresaId, token }),
+    cache: 'no-store',
     credentials: 'include',
   })
 
@@ -142,9 +273,13 @@ export async function selecionarEmpresa(empresaId: string, tempToken?: string): 
     throw new Error(data.error || 'Falha ao selecionar empresa.')
   }
 
+  await clearOfflineDataCache()
+
   if (data.token) {
     setToken(data.token)
   }
+  const resolvedEmpresaId = data.empresaAtiva?.empresa_id || data.empresaAtiva?.id || empresaId
+  setActiveEmpresaId(resolvedEmpresaId)
 
   return data
 }
@@ -156,12 +291,14 @@ export async function logoutVendedor() {
     // best effort cookie cleanup
   }
   clearToken()
+  setActiveEmpresaId(null)
+  await clearOfflineDataCache()
   localStorage.removeItem('vendedor_carrinho')
   localStorage.removeItem('vendedor_cliente')
   window.location.reload()
 }
 
-// 1. Produtos com Fallback Offline
+// 1. Produtos: estritamente online-first; fallback offline SOMENTE em erro de rede
 export async function getProdutos(): Promise<{ produtos: Produto[]; fromCache: boolean }> {
   try {
     const data = await fetchWithAuth('/api/produtos')
@@ -170,24 +307,29 @@ export async function getProdutos(): Promise<{ produtos: Produto[]; fromCache: b
     await set('offline_produtos_time', new Date().toISOString())
     return { produtos: list, fromCache: false }
   } catch (err) {
-    const cached = await get<Produto[]>('offline_produtos')
-    if (cached && cached.length > 0) {
-      return { produtos: cached, fromCache: true }
+    if (isNetworkOfflineError(err)) {
+      const cached = await get<Produto[]>('offline_produtos')
+      if (cached) {
+        return { produtos: cached, fromCache: true }
+      }
     }
     throw err
   }
 }
 
-// 2. Categorias com Fallback Offline
+// 2. Categorias com Fallback Offline apenas em erro de rede
 export async function getCategorias(): Promise<Categoria[]> {
   try {
     const data = await fetchWithAuth('/api/categorias')
     const list: Categoria[] = data.categorias || []
     await set('offline_categorias', list)
     return list
-  } catch {
-    const cached = await get<Categoria[]>('offline_categorias')
-    return cached || []
+  } catch (err) {
+    if (isNetworkOfflineError(err)) {
+      const cached = await get<Categoria[]>('offline_categorias')
+      return cached || []
+    }
+    throw err
   }
 }
 
@@ -210,13 +352,16 @@ export async function getTabelasPreco(): Promise<TabelaPreco[]> {
     const list = deduplicarTabelas(data.tabelas || [])
     await set('offline_tabelas', list)
     return list
-  } catch {
-    const cached = await get<TabelaPreco[]>('offline_tabelas')
-    return deduplicarTabelas(cached || [])
+  } catch (err) {
+    if (isNetworkOfflineError(err)) {
+      const cached = await get<TabelaPreco[]>('offline_tabelas')
+      return deduplicarTabelas(cached || [])
+    }
+    throw err
   }
 }
 
-// 3b. Condições e Formas de Pagamento com Fallback Offline
+// 3b. Condições e Formas de Pagamento com Fallback Offline apenas em erro de rede
 export async function getCondicoesPagamento(): Promise<{
   formas: FormaPagamento[]
   prazos: PrazoPagamento[]
@@ -228,10 +373,13 @@ export async function getCondicoesPagamento(): Promise<{
     await set('offline_formas_pagamento', formas)
     await set('offline_prazos_pagamento', prazos)
     return { formas, prazos }
-  } catch {
-    const formas = (await get<FormaPagamento[]>('offline_formas_pagamento')) || []
-    const prazos = (await get<PrazoPagamento[]>('offline_prazos_pagamento')) || []
-    return { formas, prazos }
+  } catch (err) {
+    if (isNetworkOfflineError(err)) {
+      const formas = (await get<FormaPagamento[]>('offline_formas_pagamento')) || []
+      const prazos = (await get<PrazoPagamento[]>('offline_prazos_pagamento')) || []
+      return { formas, prazos }
+    }
+    throw err
   }
 }
 
@@ -242,13 +390,16 @@ export async function getClientes(): Promise<Cliente[]> {
     const list: Cliente[] = data.clientes || []
     await set('offline_clientes', list)
     return list
-  } catch {
-    const cached = await get<Cliente[]>('offline_clientes')
-    return cached || []
+  } catch (err) {
+    if (isNetworkOfflineError(err)) {
+      const cached = await get<Cliente[]>('offline_clientes')
+      return cached || []
+    }
+    throw err
   }
 }
 
-// 5. Fila Offline + Envio de Pedido
+// 5. Fila Offline + Envio de Pedido (com mutex contra envio duplicado)
 const PENDING_QUEUE_KEY = 'pending_orders_queue'
 
 export async function getPendingOfflineOrders(): Promise<PendingOfflineOrder[]> {
@@ -264,15 +415,94 @@ export async function removePendingOfflineOrder(localId: string): Promise<void> 
   )
 }
 
+function buildPendingOrderEntry(
+  payload: CriarPedidoPayload,
+  meta?: {
+    localId?: string
+    empresaId?: string
+    clienteNome?: string
+    totalEstimado?: number
+    descontoValor?: number
+    descontoPercentual?: number
+    itensResumo?: PendingOfflineOrder['itensResumo']
+  }
+): PendingOfflineOrder {
+  const bruto = payload.itens.reduce((acc, it) => acc + it.quantidade * it.precoUnitario, 0)
+  const descontoItens = payload.itens.reduce((acc, it) => {
+    const sub = it.quantidade * it.precoUnitario
+    const itemDesc =
+      it.descontoValor && it.descontoValor > 0
+        ? it.descontoValor
+        : sub * ((it.descontoPct || 0) / 100)
+    return acc + itemDesc
+  }, 0)
+  const descontoValor =
+    meta?.descontoValor ??
+    payload.descontoValor ??
+    payload.descontoGeralValor ??
+    Number(descontoItens.toFixed(2))
+  const descontoPercentual =
+    meta?.descontoPercentual ??
+    payload.descontoPercentual ??
+    (bruto > 0 ? Number(((descontoValor / bruto) * 100).toFixed(2)) : 0)
+  const totalEstimado =
+    meta?.totalEstimado ?? Math.max(0, Number((bruto - descontoValor).toFixed(2)))
+  const empresaId = meta?.empresaId || payload.empresaId || getActiveEmpresaId()
+
+  const normalizedPayload: CriarPedidoPayload = {
+    clienteId: payload.clienteId,
+    empresaId,
+    tabelaPrecoId: payload.tabelaPrecoId,
+    formaPagamentoId: payload.formaPagamentoId,
+    prazoPagamentoId: payload.prazoPagamentoId,
+    condicaoPagamento: payload.condicaoPagamento || 'À Vista',
+    formaPagamento: payload.formaPagamento,
+    status: payload.status || 'pendente',
+    descontoGeralValor: payload.descontoGeralValor ?? (descontoValor > 0 ? descontoValor : undefined),
+    descontoValor: payload.descontoValor ?? descontoValor,
+    descontoPercentual: payload.descontoPercentual ?? descontoPercentual,
+    observacoes: payload.observacoes,
+    itens: payload.itens,
+  }
+
+  return {
+    localId: meta?.localId || `off_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    empresaId,
+    clienteNome: meta?.clienteNome || 'Cliente selecionado',
+    condicaoPagamento: normalizedPayload.condicaoPagamento || 'À Vista',
+    formaPagamento: normalizedPayload.formaPagamento,
+    descontoValor,
+    descontoPercentual,
+    totalEstimado,
+    itensResumo: meta?.itensResumo || [],
+    queuedAt: new Date().toISOString(),
+    payload: normalizedPayload,
+  }
+}
+
 export async function enviarPedido(
   payload: CriarPedidoPayload,
   meta?: {
+    empresaId?: string
     clienteNome?: string
     totalEstimado?: number
+    descontoValor?: number
+    descontoPercentual?: number
     itensResumo?: PendingOfflineOrder['itensResumo']
     permitirOffline?: boolean
   }
 ): Promise<any> {
+  const queueAndReturn = async () => {
+    const queue = await getPendingOfflineOrders()
+    const entry = buildPendingOrderEntry(payload, meta)
+    await set(PENDING_QUEUE_KEY, [entry, ...queue])
+    return { ok: true, offlineQueued: true, offlineOrder: entry }
+  }
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine && meta?.permitirOffline !== false) {
+    return queueAndReturn()
+  }
+
   try {
     const data = await fetchWithAuth('/api/pedidos', {
       method: 'POST',
@@ -280,38 +510,27 @@ export async function enviarPedido(
     })
     return data
   } catch (err: any) {
-    const isNetworkError = !navigator.onLine || err?.name === 'TypeError' || String(err?.message || '').includes('Sem conexão')
-    if (isNetworkError && meta?.permitirOffline !== false) {
-      const queue = await getPendingOfflineOrders()
-      const totalEstimado =
-        meta?.totalEstimado ??
-        payload.itens.reduce(
-          (acc, it) => acc + it.quantidade * it.precoUnitario * (1 - (it.descontoPct || 0) / 100),
-          0
-        )
-      const entry: PendingOfflineOrder = {
-        localId: `off_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        clienteNome: meta?.clienteNome || 'Cliente selecionado',
-        condicaoPagamento: payload.condicaoPagamento || 'À Vista',
-        formaPagamento: payload.formaPagamento,
-        totalEstimado,
-        itensResumo: meta?.itensResumo || [],
-        queuedAt: new Date().toISOString(),
-        payload,
-      }
-      await set(PENDING_QUEUE_KEY, [entry, ...queue])
-      return { ok: true, offlineQueued: true, offlineOrder: entry }
+    if (isNetworkOfflineError(err) && meta?.permitirOffline !== false) {
+      return queueAndReturn()
     }
     throw err
   }
 }
 
-export async function syncPendingOfflineOrders(): Promise<{
+let syncInFlight: Promise<{
   synced: number
   failed: number
   remaining: PendingOfflineOrder[]
+  authExpired?: boolean
+}> | null = null
+
+async function runSyncPendingOfflineOrders(): Promise<{
+  synced: number
+  failed: number
+  remaining: PendingOfflineOrder[]
+  authExpired?: boolean
 }> {
-  if (!navigator.onLine) {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
     const remaining = await getPendingOfflineOrders()
     return { synced: 0, failed: 0, remaining }
   }
@@ -321,31 +540,84 @@ export async function syncPendingOfflineOrders(): Promise<{
     return { synced: 0, failed: 0, remaining: [] }
   }
 
+  const activeEmpresaId = getActiveEmpresaId()
+  const syncedIds = new Set<string>()
+  const errorMap = new Map<string, string>()
   let synced = 0
   let failed = 0
-  const remaining: PendingOfflineOrder[] = []
+  let authExpired = false
 
-  for (const item of queue) {
+  // Envia na ordem cronológica (mais antigo primeiro)
+  const ordered = [...queue].reverse()
+
+  for (const item of ordered) {
+    if (item.empresaId && activeEmpresaId && item.empresaId !== activeEmpresaId) {
+      continue
+    }
+
     try {
-      await fetchWithAuth('/api/pedidos', {
+      const res = await fetchWithAuth('/api/pedidos', {
         method: 'POST',
         body: JSON.stringify(item.payload),
       })
       synced++
+      syncedIds.add(item.localId)
+
+      if (item.payload.status === 'orcamento' && res?.pedido?.id) {
+        const locais = getOrcamentosLocais()
+        let changed = false
+        const updatedLocais = locais.map((orc) => {
+          if (orc.pendingLocalId === item.localId) {
+            changed = true
+            return {
+              ...orc,
+              pedidoId: res.pedido.id,
+              numero: res.pedido.numero || orc.numero,
+              pendingLocalId: undefined,
+              updatedAt: new Date().toISOString(),
+            }
+          }
+          return orc
+        })
+        if (changed) {
+          setOrcamentosLocais(updatedLocais)
+        }
+      }
     } catch (err: any) {
+      if (err instanceof AuthError) {
+        authExpired = true
+        break
+      }
       failed++
-      remaining.push({
-        ...item,
-        lastError: err?.message || 'Falha ao sincronizar',
-      })
+      errorMap.set(item.localId, err?.message || 'Falha ao sincronizar')
     }
   }
 
+  const latestQueue = await getPendingOfflineOrders()
+  const remaining = latestQueue
+    .filter((q) => !syncedIds.has(q.localId))
+    .map((q) =>
+      errorMap.has(q.localId) ? { ...q, lastError: errorMap.get(q.localId) } : q
+    )
+
   await set(PENDING_QUEUE_KEY, remaining)
-  return { synced, failed, remaining }
+  return { synced, failed, remaining, authExpired }
 }
 
-// 6. Orçamentos Salvos (Local + Sincronizado com API)
+export function syncPendingOfflineOrders(): Promise<{
+  synced: number
+  failed: number
+  remaining: PendingOfflineOrder[]
+  authExpired?: boolean
+}> {
+  if (syncInFlight) return syncInFlight
+  syncInFlight = runSyncPendingOfflineOrders().finally(() => {
+    syncInFlight = null
+  })
+  return syncInFlight
+}
+
+// 6. Orçamentos Salvos (Local + Sincronizado com API / Fila Offline)
 const ORCAMENTOS_STORAGE_KEY = 'thoth_vendedor_orcamentos_salvos'
 
 export function getOrcamentosLocais(): OrcamentoSalvo[] {
@@ -363,6 +635,7 @@ function setOrcamentosLocais(list: OrcamentoSalvo[]) {
 
 export async function salvarOrcamento(params: {
   id?: string
+  empresaId?: string
   cliente: Cliente | null
   tabelaPrecoId?: string
   formaPagamentoId?: string
@@ -378,40 +651,92 @@ export async function salvarOrcamento(params: {
     0
   )
   const valorTotal = Math.max(0, subtotal - descontoTotal)
+  const descontoPercentual = subtotal > 0 ? Number(((descontoTotal / subtotal) * 100).toFixed(2)) : 0
   const now = new Date().toISOString()
   const numero = `ORC-${String(Date.now()).slice(-5)}`
+  const empresaId = params.empresaId || getActiveEmpresaId()
 
   let serverPedidoId: string | undefined
   let serverNumero = numero
+  let pendingLocalId: string | undefined
 
-  // Se houver cliente selecionado e internet, também salva no banco como status='orcamento'
-  if (params.cliente?.id && navigator.onLine) {
-    try {
-      const res = await fetchWithAuth('/api/pedidos', {
-        method: 'POST',
-        body: JSON.stringify({
-          clienteId: params.cliente.id,
-          tabelaPrecoId: params.tabelaPrecoId,
-          formaPagamentoId: params.formaPagamentoId,
-          prazoPagamentoId: params.prazoPagamentoId,
-          formaPagamento: params.formaPagamento,
-          condicaoPagamento: params.condicaoPagamento,
-          status: 'orcamento',
-          observacoes: params.observacoes.trim() || undefined,
-          itens: params.itens.map((it) => ({
-            produtoId: it.produtoId,
-            quantidade: it.quantidade,
-            precoUnitario: it.precoUnitarioCobrado,
-            descontoPct: it.descontoPct || 0,
-          })),
-        }),
-      })
-      if (res?.pedido?.id) {
-        serverPedidoId = res.pedido.id
-        serverNumero = res.pedido.numero || numero
+  // Se houver cliente selecionado, tenta salvar no banco como status='orcamento' ou enfileira offline
+  if (params.cliente?.id) {
+    const payload: CriarPedidoPayload = {
+      clienteId: params.cliente.id,
+      empresaId,
+      tabelaPrecoId: params.tabelaPrecoId,
+      formaPagamentoId: params.formaPagamentoId,
+      prazoPagamentoId: params.prazoPagamentoId,
+      formaPagamento: params.formaPagamento,
+      condicaoPagamento: params.condicaoPagamento,
+      status: 'orcamento',
+      descontoValor: Number(descontoTotal.toFixed(2)),
+      descontoPercentual,
+      observacoes: params.observacoes.trim() || undefined,
+      itens: params.itens.map((it) => ({
+        produtoId: it.produtoId,
+        quantidade: it.quantidade,
+        precoUnitario: it.precoUnitarioCobrado,
+        descontoPct: it.descontoPct || 0,
+      })),
+    }
+
+    if (navigator.onLine) {
+      try {
+        const res = await fetchWithAuth('/api/pedidos', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        })
+        if (res?.pedido?.id) {
+          serverPedidoId = res.pedido.id
+          serverNumero = res.pedido.numero || numero
+        }
+      } catch (e) {
+        if (isNetworkOfflineError(e)) {
+          pendingLocalId = `off_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+          const queue = await getPendingOfflineOrders()
+          const entry = buildPendingOrderEntry(payload, {
+            localId: pendingLocalId,
+            empresaId,
+            clienteNome: params.cliente.nome_fantasia || params.cliente.razao_social,
+            totalEstimado: valorTotal,
+            descontoValor: Number(descontoTotal.toFixed(2)),
+            descontoPercentual,
+            itensResumo: params.itens.map((it) => ({
+              nome: it.nome,
+              codigo: it.codigo,
+              unidade: it.unidade,
+              quantidade: it.quantidade,
+              precoUnitario: it.precoUnitarioCobrado,
+              descontoPct: it.descontoPct || 0,
+            })),
+          })
+          await set(PENDING_QUEUE_KEY, [entry, ...queue])
+        } else {
+          console.warn('Orçamento salvo localmente (sem sincronizar com servidor):', e)
+        }
       }
-    } catch (e) {
-      console.warn('Orçamento salvo localmente (sem sincronizar com servidor):', e)
+    } else {
+      pendingLocalId = `off_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+      const queue = await getPendingOfflineOrders()
+      const entry = buildPendingOrderEntry(payload, {
+        localId: pendingLocalId,
+        empresaId,
+        clienteNome: params.cliente.nome_fantasia || params.cliente.razao_social,
+        totalEstimado: valorTotal,
+        descontoValor: Number(descontoTotal.toFixed(2)),
+        descontoPercentual,
+        itensResumo: params.itens.map((it) => ({
+          nome: it.nome,
+          codigo: it.codigo,
+          unidade: it.unidade,
+          quantidade: it.quantidade,
+          precoUnitario: it.precoUnitarioCobrado,
+          descontoPct: it.descontoPct || 0,
+        })),
+      })
+      await set(PENDING_QUEUE_KEY, [entry, ...queue])
     }
   }
 
@@ -419,6 +744,8 @@ export async function salvarOrcamento(params: {
     id: params.id || serverPedidoId || `orc_${Date.now()}`,
     numero: serverNumero,
     pedidoId: serverPedidoId,
+    pendingLocalId,
+    empresaId,
     cliente: params.cliente,
     tabelaPrecoId: params.tabelaPrecoId,
     formaPagamentoId: params.formaPagamentoId,
@@ -440,8 +767,15 @@ export async function salvarOrcamento(params: {
 }
 
 export async function removerOrcamento(id: string, pedidoId?: string): Promise<void> {
-  const atuais = getOrcamentosLocais().filter((o) => o.id !== id && o.pedidoId !== id)
+  const todos = getOrcamentosLocais()
+  const alvo = todos.find((o) => o.id === id || o.pedidoId === id)
+  const atuais = todos.filter((o) => o.id !== id && o.pedidoId !== id)
   setOrcamentosLocais(atuais)
+
+  if (alvo?.pendingLocalId) {
+    await removePendingOfflineOrder(alvo.pendingLocalId)
+  }
+
   const targetServerId = pedidoId || (id.startsWith('orc_') ? undefined : id)
   if (targetServerId && navigator.onLine) {
     try {
@@ -461,16 +795,28 @@ export async function converterOrcamentoNoServidor(pedidoId: string): Promise<Pe
   return data?.pedido || null
 }
 
-// 7. Dados do Vendedor Autenticado
+// 7. Dados do Vendedor Autenticado (online-first, fallback offline em erro de rede)
 export async function getMe(): Promise<any> {
   try {
-    return await fetchWithAuth('/api/auth/me')
-  } catch {
-    return null
+    const data = await fetchWithAuth('/api/auth/me')
+    if (data) {
+      await set('offline_me', data)
+      const empresaId = data.empresaAtiva?.empresa_id || data.empresaAtiva?.id
+      if (empresaId) {
+        setActiveEmpresaId(empresaId)
+      }
+    }
+    return data
+  } catch (err) {
+    if (isNetworkOfflineError(err)) {
+      const cached = await get<any>('offline_me')
+      return cached || null
+    }
+    throw err
   }
 }
 
-// 8. Pedidos do Vendedor (com Fallback Offline)
+// 8. Pedidos do Vendedor (online-first, fallback offline SOMENTE em erro de rede)
 export async function getPedidos(status?: string): Promise<Pedido[]> {
   try {
     const url =
@@ -483,12 +829,15 @@ export async function getPedidos(status?: string): Promise<Pedido[]> {
       await set('offline_pedidos', list)
     }
     return list
-  } catch {
-    const cached = (await get<Pedido[]>('offline_pedidos')) || []
-    if (status && status !== 'todos') {
-      return cached.filter((p) => p.status === status)
+  } catch (err) {
+    if (isNetworkOfflineError(err)) {
+      const cached = (await get<Pedido[]>('offline_pedidos')) || []
+      if (status && status !== 'todos') {
+        return cached.filter((p) => p.status === status)
+      }
+      return cached
     }
-    return cached
+    throw err
   }
 }
 
@@ -496,7 +845,11 @@ export async function getPedidoDetalhes(id: string): Promise<Pedido | null> {
   try {
     const data = await fetchWithAuth(`/api/pedidos/${id}`)
     return data.pedido || null
-  } catch {
+  } catch (err) {
+    if (isNetworkOfflineError(err)) {
+      const cached = (await get<Pedido[]>('offline_pedidos')) || []
+      return cached.find((p) => p.id === id) || null
+    }
     return null
   }
 }
@@ -514,7 +867,7 @@ export async function cancelarPedido(id: string): Promise<Pedido | null> {
   return data?.pedido || null
 }
 
-// 9. Meta e Desempenho do Vendedor
+// 9. Meta e Desempenho do Vendedor (online-first, fallback offline SOMENTE em erro de rede)
 export async function getVendedorMeta(): Promise<VendedorMeta | null> {
   try {
     const data = await fetchWithAuth('/api/vendedor/meta')
@@ -523,9 +876,12 @@ export async function getVendedorMeta(): Promise<VendedorMeta | null> {
       return data.meta
     }
     return null
-  } catch {
-    const cached = await get<VendedorMeta>('offline_vendedor_meta')
-    return cached || null
+  } catch (err) {
+    if (isNetworkOfflineError(err)) {
+      const cached = await get<VendedorMeta>('offline_vendedor_meta')
+      return cached || null
+    }
+    throw err
   }
 }
 
