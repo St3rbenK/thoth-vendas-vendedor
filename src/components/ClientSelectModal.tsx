@@ -27,9 +27,9 @@ export const ClientSelectModal: React.FC<ClientSelectModalProps> = ({
     return clientes
       .filter(
         (c) =>
-          c.razao_social.toLowerCase().includes(term) ||
+          (c.razao_social || '').toLowerCase().includes(term) ||
           (c.nome_fantasia && c.nome_fantasia.toLowerCase().includes(term)) ||
-          c.cpf_cnpj.includes(term) ||
+          (c.cpf_cnpj || '').includes(term) ||
           (c.cidade && c.cidade.toLowerCase().includes(term))
       )
       .slice(0, 80)

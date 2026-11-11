@@ -3,6 +3,7 @@ import { Header } from './components/Header'
 import { ProductCard } from './components/ProductCard'
 import { CartDrawer } from './components/CartDrawer'
 import { ClientSelectModal } from './components/ClientSelectModal'
+import { NewClientModal } from './components/NewClientModal'
 import { VendedorAuthScreen } from './components/VendedorAuthScreen'
 import { DesktopSidebar, MobileBottomNav, TabType } from './components/Navigation'
 import { PedidosView } from './components/PedidosView'
@@ -124,6 +125,7 @@ export function App() {
 
   const [cartOpen, setCartOpen] = useState(false)
   const [clienteModalOpen, setClienteModalOpen] = useState(false)
+  const [newClientModalOpen, setNewClientModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [empresaNome, setEmpresaNome] = useState('ThothVendas')
@@ -960,8 +962,20 @@ export function App() {
           setClienteModalOpen(false)
         }}
         onNewClient={() => {
-          setAutoOpenNewClient(true)
-          setActiveTab('mais')
+          setClienteModalOpen(false)
+          setNewClientModalOpen(true)
+        }}
+      />
+
+      {/* Modal Rápido de Cadastro de Novo Cliente */}
+      <NewClientModal
+        isOpen={newClientModalOpen}
+        onClose={() => setNewClientModalOpen(false)}
+        tabelas={tabelas}
+        onCreated={(c) => {
+          setClientes((prev) => [c, ...prev])
+          setSelectedCliente(c)
+          showToast(`Cliente ${c.razao_social} cadastrado e selecionado!`)
         }}
       />
 

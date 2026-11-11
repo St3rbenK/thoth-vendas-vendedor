@@ -114,7 +114,8 @@ export function MaisView({
       setFormError(null)
       if (onClearAutoOpenNewClient) onClearAutoOpenNewClient()
     }
-  }, [autoOpenNewClient, onClearAutoOpenNewClient])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenNewClient])
 
   const [clienteForm, setClienteForm] = useState<NovoClientePayload>({
     razao_social: '',
@@ -288,20 +289,23 @@ export function MaisView({
     if (!clienteSearch.trim()) return true
     const term = clienteSearch.toLowerCase()
     return (
-      c.razao_social.toLowerCase().includes(term) ||
+      (c.razao_social || '').toLowerCase().includes(term) ||
       (c.nome_fantasia && c.nome_fantasia.toLowerCase().includes(term)) ||
-      c.cpf_cnpj.includes(term) ||
+      (c.cpf_cnpj || '').includes(term) ||
       (c.cidade && c.cidade.toLowerCase().includes(term))
     )
   })
 
   const limiteDesconto = currentUser?.limite_desconto_pct ?? 15
-  const initials = (currentUser?.nome || 'Vendedor')
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase()
+  const initials =
+    (currentUser?.nome || 'Vendedor')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join('')
+      .toUpperCase() || 'VD'
 
   const empresaLabel =
     empresaAtiva?.nome_fantasia || empresaAtiva?.razao_social || 'Empresa conectada'
@@ -757,12 +761,15 @@ export function MaisView({
                 </div>
               ) : (
                 filteredClientes.map((c) => {
-                  const cliInitials = (c.nome_fantasia || c.razao_social || 'C')
-                    .split(/\s+/)
-                    .slice(0, 2)
-                    .map((w) => w[0])
-                    .join('')
-                    .toUpperCase()
+                  const cliInitials =
+                    (c.nome_fantasia || c.razao_social || 'C')
+                      .trim()
+                      .split(/\s+/)
+                      .filter(Boolean)
+                      .slice(0, 2)
+                      .map((w) => w[0])
+                      .join('')
+                      .toUpperCase() || 'C'
                   return (
                     <div
                       key={c.id}
